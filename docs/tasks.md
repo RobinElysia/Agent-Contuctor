@@ -56,7 +56,7 @@ Out of scope:
 - runtime implementation
 
 ### Task ID: RES-01
-Status: todo
+Status: done
 Depends on: DOC-01
 Scope: read `2602.17100v1.pdf` and distill the method into implementation-oriented notes
 Files:
