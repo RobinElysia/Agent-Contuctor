@@ -2,15 +2,30 @@
 
 This document describes the current stable Python API exposed by the repository root package.
 
-The API in this milestone is intentionally narrow. It provides a typed entrypoint for callers who want a paper-aligned solve plan. It does not yet execute the full AgentConductor method.
+The API is still in an early milestone. It currently provides:
 
-## Stability
+- a typed solve-planning entrypoint
+- typed topology schema objects for single-turn plans
+- validation rules for topology structure before execution
 
-Current stable entrypoint:
+The repository does not yet execute the full AgentConductor method.
+
+## Public Entry Points
+
+Stable callable API:
 
 - `agentconductor.solve_problem`
 
-Supporting public types:
+Stable public topology contract:
+
+- `agentconductor.TopologyPlan`
+- `agentconductor.TopologyStep`
+- `agentconductor.AgentInvocation`
+- `agentconductor.AgentReference`
+- `agentconductor.AgentRole`
+- `agentconductor.TopologyValidationError`
+
+Other public types:
 
 - `agentconductor.ProblemInstance`
 - `agentconductor.DifficultyLevel`
@@ -26,13 +41,13 @@ From the repository root:
 uv sync
 ```
 
-Then use the package from Python:
+Then import from Python:
 
 ```python
-from agentconductor import DifficultyLevel, ProblemInstance, solve_problem
+from agentconductor import ProblemInstance, TopologyPlan, solve_problem
 ```
 
-## Entry Point
+## Solve API
 
 ### `solve_problem(problem, *, max_turns=None) -> SolveResult`
 
@@ -41,143 +56,165 @@ Prepare a structured solve plan for a problem instance.
 Parameters:
 
 - `problem: ProblemInstance`
-  The problem descriptor supplied by the caller.
 - `max_turns: int | None = None`
-  Optional override for the number of planned interaction turns.
 
 Behavior:
 
-- If `problem.difficulty` is provided, the API uses it directly.
-- If `problem.difficulty` is omitted, the current baseline defaults to `DifficultyLevel.MEDIUM`.
-- If `max_turns` is omitted, the API uses the current baseline limit from project bootstrap data.
-- If `max_turns < 1`, the API raises `ValueError`.
-- If `max_turns` exceeds the current baseline limit, the API raises `ValueError`.
+- uses the explicit difficulty from `problem` when present
+- defaults missing difficulty to `DifficultyLevel.MEDIUM`
+- validates the turn budget against the current baseline limit
 
 Implementation inference:
 
-- The default difficulty fallback is an engineering inference, not a direct paper fact. The paper says difficulty is inferred by the orchestrator, but the repository does not yet implement that inference mechanism.
+- the medium-difficulty fallback is an engineering inference until the repository implements the paper's real difficulty inference mechanism
 
-## Input Types
+## Topology Schema
 
-### `DifficultyLevel`
-
-String enum values:
-
-- `DifficultyLevel.EASY`
-- `DifficultyLevel.MEDIUM`
-- `DifficultyLevel.HARD`
-
-### `ProblemInstance`
+### `TopologyPlan`
 
 ```python
-ProblemInstance(
-    identifier: str,
-    prompt: str,
-    difficulty: DifficultyLevel | None = None,
+TopologyPlan(
+    difficulty: DifficultyLevel,
+    steps: tuple[TopologyStep, ...],
 )
 ```
 
-Fields:
+Current scope:
 
-- `identifier`
-  Stable caller-defined problem id.
-- `prompt`
-  Natural-language problem statement or task prompt.
-- `difficulty`
-  Optional explicit difficulty tier.
+- single-turn topology only
+- layered DAG structure
+- dependency-free parsing from plain mappings via `TopologyPlan.from_mapping(...)`
 
-### `SolveRequest`
+Properties:
 
-```python
-SolveRequest(
-    problem: ProblemInstance,
-    max_turns: int | None = None,
-)
-```
-
-This type exists as a public contract for the application boundary, although most external callers can use `solve_problem(...)` directly.
-
-## Output Type
-
-### `SolveResult`
-
-```python
-SolveResult(
-    problem_id: str,
-    status: SolveStatus,
-    selected_difficulty: DifficultyLevel,
-    planned_turns: int,
-    max_nodes: int,
-    available_roles: tuple[str, ...],
-    notes: tuple[str, ...],
-)
-```
-
-Fields:
-
-- `problem_id`
-  Echoes the input problem identifier.
-- `status`
-  Current solve state. The present baseline only returns `SolveStatus.PLANNED`.
-- `selected_difficulty`
-  Effective difficulty used by the baseline.
-- `planned_turns`
-  Number of interaction turns allocated by the baseline.
+- `node_count`
 - `max_nodes`
-  Difficulty-specific topology node cap derived from the paper summary.
-- `available_roles`
-  Role names currently recognized by the baseline.
-- `notes`
-  Human-readable notes describing the current execution boundary.
 
-### `SolveStatus`
+Methods:
 
-Current enum values:
+- `validate() -> None`
+- `from_mapping(raw_plan: Mapping[str, Any]) -> TopologyPlan`
 
-- `SolveStatus.PLANNED`
-
-## Example
+### `TopologyStep`
 
 ```python
-from agentconductor import DifficultyLevel, ProblemInstance, solve_problem
-
-result = solve_problem(
-    ProblemInstance(
-        identifier="apps-two-sum",
-        prompt="Write a function that returns two indices adding up to a target.",
-        difficulty=DifficultyLevel.EASY,
-    ),
-    max_turns=1,
+TopologyStep(
+    index: int,
+    agents: tuple[AgentInvocation, ...],
 )
+```
 
-assert result.problem_id == "apps-two-sum"
-assert result.selected_difficulty == DifficultyLevel.EASY
-assert result.planned_turns == 1
-assert result.max_nodes == 4
-assert result.status.value == "planned"
+### `AgentInvocation`
+
+```python
+AgentInvocation(
+    name: str,
+    role: AgentRole,
+    refs: tuple[AgentReference, ...] = (),
+)
+```
+
+### `AgentReference`
+
+```python
+AgentReference(
+    step_index: int,
+    agent_name: str,
+)
+```
+
+### `AgentRole`
+
+Enum values:
+
+- `retrieval`
+- `planning`
+- `algorithmic`
+- `coding`
+- `debugging`
+- `testing`
+
+## Validation Rules
+
+The current topology validator enforces these constraints:
+
+- the plan must contain at least one step
+- step indices must be contiguous and zero-based
+- every step must contain at least one agent
+- agent names must be unique across the full topology
+- the first step must not contain references
+- references may target earlier steps only
+- references must point to known prior agent names
+- the final step must contain a testing agent
+- the total node count must stay within the paper-derived difficulty budget
+
+Difficulty-specific node budgets:
+
+- `easy`: `4`
+- `medium`: `7`
+- `hard`: `10`
+
+Implementation inference:
+
+- the paper does not define a full concrete schema; `from_mapping(...)` is a repository-local parsing contract used until a YAML adapter is added
+
+## Topology Parsing Example
+
+```python
+from agentconductor import TopologyPlan
+
+plan = TopologyPlan.from_mapping(
+    {
+        "difficulty": "easy",
+        "steps": [
+            {
+                "index": 0,
+                "agents": [
+                    {"name": "planner_0", "role": "planning", "refs": []},
+                ],
+            },
+            {
+                "index": 1,
+                "agents": [
+                    {
+                        "name": "coder_1",
+                        "role": "coding",
+                        "refs": [{"step_index": 0, "agent_name": "planner_0"}],
+                    },
+                    {
+                        "name": "tester_1",
+                        "role": "testing",
+                        "refs": [{"step_index": 0, "agent_name": "planner_0"}],
+                    },
+                ],
+            },
+        ],
+    }
+)
 ```
 
 ## Current Limits
 
-The API currently does not:
+The repository currently does not:
 
-- generate topology YAML
-- execute agents
+- generate topology YAML from an orchestrator
+- execute the graph
 - run code in a sandbox
-- revise plans across failed turns
-- return candidate code
+- revise topology over multiple turns
+- return candidate code from `solve_problem(...)`
 
 It currently does:
 
-- expose a typed package boundary for callers
-- validate turn-budget constraints
-- map difficulty to node-budget constraints
-- return a structured baseline planning result
+- expose typed topology contracts
+- parse single-turn topologies from plain mappings
+- validate paper-aligned topology structure
+- expose a narrow typed planning API for callers
 
 ## Source References
 
 Implementation files:
 
+- [src/agentconductor/domain/topology.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/domain/topology.py)
 - [src/agentconductor/interfaces/api.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/interfaces/api.py)
 - [src/agentconductor/application/api.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/application/api.py)
 - [src/agentconductor/domain/models.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/domain/models.py)
