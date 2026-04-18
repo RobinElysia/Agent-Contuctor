@@ -4,17 +4,21 @@ This document describes the current stable Python API exposed by the repository 
 
 The API is still in an early milestone. It currently provides:
 
-- a typed solve-planning entrypoint
+- a typed solve entrypoint with deterministic planning and single-turn execution
+- a deterministic topology-planning entrypoint
+- a deterministic single-turn topology-execution entrypoint
 - typed topology schema objects for single-turn plans
 - validation rules for topology structure before execution
 
-The repository does not yet execute the full AgentConductor method.
+The repository does not yet execute the full multi-turn AgentConductor method.
 
 ## Public Entry Points
 
 Stable callable API:
 
 - `agentconductor.solve_problem`
+- `agentconductor.plan_problem_topology`
+- `agentconductor.execute_topology_plan`
 
 Stable public topology contract:
 
@@ -27,6 +31,12 @@ Stable public topology contract:
 
 Other public types:
 
+- `agentconductor.AgentExecutionResult`
+- `agentconductor.StepExecutionResult`
+- `agentconductor.TopologyExecutionResult`
+- `agentconductor.ExecutionStatus`
+- `agentconductor.TestingOutcome`
+- `agentconductor.TopologyExecutionError`
 - `agentconductor.ProblemInstance`
 - `agentconductor.DifficultyLevel`
 - `agentconductor.SolveRequest`
@@ -44,14 +54,20 @@ uv sync
 Then import from Python:
 
 ```python
-from agentconductor import ProblemInstance, TopologyPlan, solve_problem
+from agentconductor import (
+    ProblemInstance,
+    TopologyPlan,
+    execute_topology_plan,
+    plan_problem_topology,
+    solve_problem,
+)
 ```
 
 ## Solve API
 
 ### `solve_problem(problem, *, max_turns=None) -> SolveResult`
 
-Prepare a structured solve plan for a problem instance.
+Plan and execute a structured single-turn solve for a problem instance.
 
 Parameters:
 
@@ -63,10 +79,64 @@ Behavior:
 - uses the explicit difficulty from `problem` when present
 - defaults missing difficulty to `DifficultyLevel.MEDIUM`
 - validates the turn budget against the current baseline limit
+- generates a deterministic single-turn topology
+- executes that topology with the current local role registry
+- returns candidate code, role trace, and final testing outcome
+
+Returned `SolveResult` fields:
+
+- `status`
+- `selected_difficulty`
+- `planned_turns`
+- `max_nodes`
+- `available_roles`
+- `topology`
+- `execution`
+- `candidate_solution`
+- `testing_outcome`
+- `notes`
 
 Implementation inference:
 
 - the medium-difficulty fallback is an engineering inference until the repository implements the paper's real difficulty inference mechanism
+- the current solve path is limited to one deterministic turn; it does not yet revise topology from feedback history
+
+## Topology Execution API
+
+### `execute_topology_plan(problem, topology) -> TopologyExecutionResult`
+
+Execute a validated single-turn topology plan layer by layer.
+
+Behavior:
+
+- validates the topology before execution
+- executes steps in index order
+- resolves references only from prior executed steps
+- dispatches each agent through a deterministic role registry
+- returns structured per-agent outputs, final candidate code, and final testing outcome
+
+Implementation inference:
+
+- the current role registry uses deterministic rule-based role handlers so execution semantics can be verified before sandbox or model integration
+
+## Topology Planning API
+
+### `plan_problem_topology(problem) -> TopologyPlan`
+
+Return a deterministic topology plan for a problem instance.
+
+Behavior:
+
+- uses the explicit problem difficulty when present
+- defaults missing difficulty to `DifficultyLevel.MEDIUM`
+- infers a coarse local problem shape from prompt keywords
+- selects one of a small set of topology templates
+- returns a validated single-turn `TopologyPlan`
+
+Implementation inference:
+
+- prompt-shape inference is a repository-local heuristic, not a paper-defined mechanism
+- the current orchestrator is deterministic and local so it can later be replaced by a learned policy
 
 ## Topology Schema
 
@@ -181,10 +251,18 @@ plan = TopologyPlan.from_mapping(
                         "role": "coding",
                         "refs": [{"step_index": 0, "agent_name": "planner_0"}],
                     },
+                ],
+            },
+            {
+                "index": 2,
+                "agents": [
                     {
-                        "name": "tester_1",
+                        "name": "tester_2",
                         "role": "testing",
-                        "refs": [{"step_index": 0, "agent_name": "planner_0"}],
+                        "refs": [
+                            {"step_index": 0, "agent_name": "planner_0"},
+                            {"step_index": 1, "agent_name": "coder_1"},
+                        ],
                     },
                 ],
             },
@@ -198,23 +276,25 @@ plan = TopologyPlan.from_mapping(
 The repository currently does not:
 
 - generate topology YAML from an orchestrator
-- execute the graph
 - run code in a sandbox
 - revise topology over multiple turns
-- return candidate code from `solve_problem(...)`
 
 It currently does:
 
 - expose typed topology contracts
 - parse single-turn topologies from plain mappings
 - validate paper-aligned topology structure
-- expose a narrow typed planning API for callers
+- emit deterministic topology plans for supported difficulty tiers
+- execute single-turn topologies with deterministic role handlers
+- return candidate code and structured execution traces from `solve_problem(...)`
 
 ## Source References
 
 Implementation files:
 
 - [src/agentconductor/domain/topology.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/domain/topology.py)
+- [src/agentconductor/application/orchestrator.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/application/orchestrator.py)
+- [src/agentconductor/interfaces/planning.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/interfaces/planning.py)
 - [src/agentconductor/interfaces/api.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/interfaces/api.py)
 - [src/agentconductor/application/api.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/application/api.py)
 - [src/agentconductor/domain/models.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/domain/models.py)

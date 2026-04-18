@@ -1,8 +1,12 @@
 """Application services for the first stable callable API."""
 
 from agentconductor.application.bootstrap import bootstrap_overview
+from agentconductor.application.execution import execute_topology
+from agentconductor.application.orchestrator import plan_topology_for_problem
+from agentconductor.domain.execution import TestingOutcome
 from agentconductor.domain.models import (
     DifficultyLevel,
+    ProblemInstance,
     SolveRequest,
     SolveResult,
     SolveStatus,
@@ -10,7 +14,7 @@ from agentconductor.domain.models import (
 
 
 def solve_request(request: SolveRequest) -> SolveResult:
-    """Prepare a typed solve plan for external callers.
+    """Prepare and execute a typed single-turn solve request.
 
     Inference:
     Until the repository implements the paper's difficulty inference logic,
@@ -26,16 +30,32 @@ def solve_request(request: SolveRequest) -> SolveResult:
         )
 
     selected_difficulty = request.problem.difficulty or DifficultyLevel.MEDIUM
+    problem = ProblemInstance(
+        identifier=request.problem.identifier,
+        prompt=request.problem.prompt,
+        difficulty=selected_difficulty,
+    )
+    topology = plan_topology_for_problem(problem)
+    execution = execute_topology(problem, topology)
+    status = (
+        SolveStatus.COMPLETED
+        if execution.testing_outcome is TestingOutcome.PASSED
+        else SolveStatus.FAILED
+    )
 
     return SolveResult(
         problem_id=request.problem.identifier,
-        status=SolveStatus.PLANNED,
+        status=status,
         selected_difficulty=selected_difficulty,
         planned_turns=planned_turns,
         max_nodes=overview.max_nodes_by_difficulty[selected_difficulty],
         available_roles=overview.supported_roles,
+        topology=topology,
+        execution=execution,
+        candidate_solution=execution.final_candidate_code,
+        testing_outcome=execution.testing_outcome,
         notes=(
-            "This API currently prepares a paper-aligned solve plan.",
-            "Topology generation and execution remain future implementation work.",
+            "This API performs deterministic topology planning plus single-turn execution.",
+            "Testing outcomes remain repository-local heuristics until sandbox integration exists.",
         ),
     )

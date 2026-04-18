@@ -140,7 +140,7 @@ Out of scope:
 - multi-turn history management
 
 ### Task ID: ORCH-01
-Status: todo
+Status: done
 Depends on: TOP-01
 Scope: implement a deterministic rule-based orchestrator that emits valid single-turn topology plans
 Files:
@@ -165,7 +165,7 @@ Out of scope:
 - reward optimization
 
 ### Task ID: EXEC-01
-Status: todo
+Status: done
 Depends on: TOP-01
 Scope: implement single-turn graph execution for a validated layered topology
 Files:
@@ -189,7 +189,7 @@ Out of scope:
 - RL reward calculation
 
 ### Task ID: API-02
-Status: todo
+Status: done
 Depends on: ORCH-01, EXEC-01
 Scope: upgrade `solve_problem()` from returning a static plan to returning a candidate solution and structured execution result
 Files:
@@ -213,3 +213,129 @@ Out of scope:
 - multi-turn topology evolution
 - external sandbox infrastructure
 - production-grade model integration
+
+### Task ID: TURN-01
+Status: todo
+Depends on: API-02
+Scope: define multi-turn solve state, history, and topology-revision contracts
+Files:
+- `src/agentconductor/domain/`
+- `src/agentconductor/application/`
+- `tests/`
+- `API.md`
+Implementation notes:
+- introduce typed history objects for turn-level topology, role trace, and testing feedback
+- model early-stop conditions and revision inputs explicitly rather than passing raw strings
+- keep the contracts compatible with the current single-turn executor so later loops can compose them
+- label any inferred history semantics that are not fully specified in the paper
+Acceptance criteria:
+- callers can construct and inspect a typed multi-turn solve state
+- turn history preserves topology, execution result, and testing outcome per turn
+- tests cover at least one successful history append and one invalid state transition
+- API documentation reflects the new multi-turn state contract if exposed
+Out of scope:
+- executing more than one turn
+- sandbox-backed code execution
+- training infrastructure
+
+### Task ID: TURN-02
+Status: todo
+Depends on: TURN-01
+Scope: implement multi-turn topology revision and stopping logic for solve requests
+Files:
+- `src/agentconductor/application/`
+- `src/agentconductor/interfaces/`
+- `src/agentconductor/domain/`
+- `tests/`
+- `API.md`
+- `README.md`
+Implementation notes:
+- extend the orchestrator boundary so a later turn can consume prior testing feedback and history
+- run plan -> execute -> evaluate in a bounded loop up to the current turn budget
+- stop early on pass and otherwise emit a revised topology for the next turn
+- keep the initial implementation deterministic and local until learned orchestration exists
+Acceptance criteria:
+- solve requests can execute more than one turn when testing fails
+- later turns consume explicit prior-turn feedback rather than recomputing from scratch only
+- tests cover early stop on pass and a two-turn revision path
+- caller-facing documentation describes the updated multi-turn behavior
+Out of scope:
+- real sandbox integration
+- RL reward optimization
+- production model serving
+
+### Task ID: SBX-01
+Status: todo
+Depends on: TURN-01
+Scope: implement real code extraction and sandbox-backed testing integration
+Files:
+- `src/agentconductor/infrastructure/`
+- `src/agentconductor/application/`
+- `src/agentconductor/domain/`
+- `tests/`
+- `docs/tech.md`
+- `API.md`
+Implementation notes:
+- define a narrow sandbox adapter interface instead of coupling execution logic to one runtime
+- extract candidate code from role outputs with an explicit contract
+- return structured execution outcomes aligned with the paper's testing-agent result categories
+- keep deterministic local fallbacks only where needed for tests
+Acceptance criteria:
+- testing agents can evaluate extracted candidate code through a concrete sandbox adapter
+- sandbox outcomes are mapped into typed execution results and diagnostics
+- tests cover at least one passing run and one failing run through the sandbox boundary
+- technical docs describe the sandbox interface and assumptions
+Out of scope:
+- distributed sandbox orchestration
+- multi-turn policy learning
+- benchmark-scale evaluation pipelines
+
+### Task ID: TRAIN-01
+Status: todo
+Depends on: TOP-01, ORCH-01
+Scope: build the synthetic-topology data and supervised-finetuning baseline for the orchestrator
+Files:
+- `src/agentconductor/`
+- `scripts/` if introduced
+- `tests/`
+- `docs/Paper.md`
+- `README.md`
+Implementation notes:
+- generate or materialize schema-valid training examples that teach structural priors
+- define a reproducible data format for problem input, difficulty, and target topology output
+- keep training code separate from runtime inference modules
+- document which parts are faithful to the paper and which parts are repository-level approximations
+Acceptance criteria:
+- the repository can produce or load SFT-ready topology training data
+- a documented training entrypoint exists for the supervised baseline
+- tests or verification cover dataset schema integrity and basic training-config validation
+- docs explain how the SFT stage maps to the paper
+Out of scope:
+- RL optimization
+- full benchmark reproduction
+- deployment of trained checkpoints
+
+### Task ID: RL-01
+Status: todo
+Depends on: TURN-02, SBX-01, TRAIN-01
+Scope: reproduce the paper's reward-driven RL stage for topology optimization
+Files:
+- `src/agentconductor/`
+- `scripts/` if introduced
+- `tests/`
+- `docs/Paper.md`
+- `README.md`
+Implementation notes:
+- implement reward calculation components for YAML validity, execution outcome, and topology density
+- define the training loop boundary so the orchestrator policy can be optimized independently of worker agents
+- preserve reproducibility with explicit configs, seeds, and artifact layout
+- document where the repository necessarily approximates paper details that remain underspecified
+Acceptance criteria:
+- the repository contains a runnable RL training path wired to the current reward components
+- reward breakdowns are inspectable per sample or rollout
+- tests cover reward calculation invariants and basic training-loop configuration validation
+- docs describe the RL stage, its assumptions, and its current fidelity limits
+Out of scope:
+- exact leaderboard reproduction
+- large-scale cluster orchestration
+- serving fine-tuned policies in production
