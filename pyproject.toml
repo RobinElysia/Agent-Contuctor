@@ -1,6 +1,31 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
 [project]
 name = "agentconductor"
 version = "0.1.0"
-description = "Add your description here"
+description = "Reusable Python package for reproducing the AgentConductor topology orchestration method."
 requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+  { name = "OpenAI Codex" },
+]
+keywords = [
+  "multi-agent",
+  "code-generation",
+  "topology",
+  "research-reproduction",
+]
 dependencies = []
+
+[project.scripts]
+agentconductor = "agentconductor.interfaces.cli:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.4.2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentconductor"]

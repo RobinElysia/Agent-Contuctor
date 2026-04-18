@@ -1,5 +1,4 @@
-def main():
-    print("Hello from agentconductor!")
+from agentconductor.interfaces.cli import main
 
 
 if __name__ == "__main__":

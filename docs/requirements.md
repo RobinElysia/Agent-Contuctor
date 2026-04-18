@@ -73,3 +73,4 @@ Each substantial milestone should leave behind:
 - code or documentation updates in the repository
 - explicit verification evidence appropriate to the change
 - enough written context for a future agent to continue without relying on chat history
+- synchronized task tracking: when work completes a task card in `docs/tasks.md`, the task status must be updated in the same change

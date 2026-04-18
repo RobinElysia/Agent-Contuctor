@@ -75,7 +75,7 @@ Out of scope:
 - API framework selection
 
 ### Task ID: BOOT-01
-Status: todo
+Status: done
 Depends on: RES-01
 Scope: replace placeholder project bootstrap files with a reproducible Python package baseline
 Files:
@@ -96,7 +96,7 @@ Out of scope:
 - external service deployment
 
 ### Task ID: API-01
-Status: todo
+Status: done
 Depends on: BOOT-01
 Scope: expose the first stable callable API around the paper method
 Files:
