@@ -9,10 +9,10 @@ The repository currently provides:
 - a stable Python solve API for deterministic planning plus bounded multi-turn execution
 - a typed multi-turn solve-state contract for turn history and later revision
 - a deterministic topology planner that emits validated single-turn plans
-- a deterministic single-turn graph executor for validated plans
+- a single-turn graph executor whose testing role runs through a local sandbox adapter
 - focused tests for the bootstrap and API layers
 
-The repository does not yet implement the full paper runtime. The current API can run up to the configured turn budget with deterministic topology revision, but it still does not support sandbox-backed evaluation.
+The repository does not yet implement the full paper runtime. The current API can run up to the configured turn budget with deterministic topology revision and local sandbox-backed evaluation, but it still does not provide a benchmark-grade external judge.
 
 ## Current Status
 
@@ -29,7 +29,6 @@ Completed milestones:
 Not yet implemented:
 
 - topology YAML generation
-- sandbox-backed code execution
 - training or RL reproduction
 
 ## Project Layout
@@ -151,7 +150,7 @@ The execution API can return a typed `TopologyExecutionResult` with:
 - per-step and per-agent structured outputs
 - resolved upstream references for each agent
 - final candidate code
-- deterministic testing outcome and diagnostics
+- local sandbox outcome and diagnostics
 
 See [API.md](/D:/code/PaperCreate/AgentConductor/API.md) for the full interface contract.
 
@@ -167,10 +166,12 @@ uv run pytest tests/test_bootstrap.py tests/test_api.py tests/test_topology.py t
 
 - The package keeps paper-method logic, application orchestration, and interfaces separated.
 - The first API is intentionally narrow. It is a stable Python boundary, not an HTTP service.
-- The executor is deliberately deterministic and local. It verifies control-flow semantics before sandbox integration.
+- The executor remains deterministic for planning and worker-role behavior, but
+  its testing role now evaluates candidate code through a local sandbox adapter.
+- The sandbox adapter is concrete but still minimal. It runs Python candidates in
+  a short-lived subprocess with a small local harness, not a full benchmark judge.
 - When behavior is inferred rather than stated by the paper, the repository documents that explicitly.
 
 ## Next Likely Steps
 
-- integrate real sandbox-backed testing
 - add training and RL reproduction paths

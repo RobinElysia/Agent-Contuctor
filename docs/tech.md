@@ -30,6 +30,10 @@ The repository should evolve toward a layered backend architecture:
 - `interfaces`
   CLI, API, or other entrypoints that call application services.
 
+For runtime evaluation, sandbox execution must stay behind a narrow adapter
+boundary. Application services may request candidate evaluation, but they
+should not embed subprocess orchestration or judge-specific details directly.
+
 The exact folder names may evolve, but the separation of responsibilities must remain clear.
 
 ## Code Organization Rules
@@ -60,6 +64,8 @@ The exact folder names may evolve, but the separation of responsibilities must r
 - Integration tests should cover boundary wiring only where it adds confidence.
 - Tests should focus on behavior, invariants, and edge cases derived from the paper.
 - If the method relies on stochastic behavior, document how determinism or tolerance is handled in tests.
+- Sandbox-backed tests should exercise the adapter boundary with concrete passing
+  and failing candidate code, while keeping local harness assumptions explicit.
 
 ## Verification Rules
 

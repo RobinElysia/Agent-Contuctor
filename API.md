@@ -7,7 +7,7 @@ The API is still in an early milestone. It currently provides:
 - a typed solve entrypoint with deterministic planning and bounded multi-turn execution
 - a typed multi-turn solve-state contract that records per-turn history
 - a deterministic topology-planning entrypoint
-- a deterministic single-turn topology-execution entrypoint
+- a single-turn topology-execution entrypoint backed by a local sandbox adapter
 - typed topology schema objects for single-turn plans
 - validation rules for topology structure before execution
 
@@ -38,6 +38,10 @@ Other public types:
 - `agentconductor.TopologyExecutionResult`
 - `agentconductor.ExecutionStatus`
 - `agentconductor.TestingOutcome`
+- `agentconductor.CodeCandidate`
+- `agentconductor.SandboxTestSpec`
+- `agentconductor.SandboxExecutionResult`
+- `agentconductor.PythonSubprocessSandboxAdapter`
 - `agentconductor.TopologyExecutionError`
 - `agentconductor.SolveState`
 - `agentconductor.SolveTurnRecord`
@@ -197,11 +201,16 @@ Behavior:
 - executes steps in index order
 - resolves references only from prior executed steps
 - dispatches each agent through a deterministic role registry
-- returns structured per-agent outputs, final candidate code, and final testing outcome
+- extracts the last referenced candidate code through an explicit code-candidate contract
+- evaluates candidate code through a concrete sandbox adapter
+- returns structured per-agent outputs, final candidate code, sandbox diagnostics, and final testing outcome
 
 Implementation inference:
 
-- the current role registry uses deterministic rule-based role handlers so execution semantics can be verified before sandbox or model integration
+- the current role registry uses deterministic non-testing worker handlers, while
+  the testing role delegates to a repository-local Python subprocess sandbox
+- the local sandbox harness validates a Python `solve()` entrypoint and checks
+  simple prompt-derived expectations until a fuller benchmark judge exists
 
 ## Topology Planning API
 
@@ -360,7 +369,6 @@ plan = TopologyPlan.from_mapping(
 The repository currently does not:
 
 - generate topology YAML from an orchestrator
-- run code in a sandbox
 
 It currently does:
 
@@ -370,7 +378,7 @@ It currently does:
 - validate paper-aligned topology structure
 - emit deterministic topology plans for supported difficulty tiers
 - emit deterministic revised topologies from prior-turn feedback
-- execute single-turn topologies with deterministic role handlers
+- execute single-turn topologies with a local sandbox-backed testing role
 - run a bounded multi-turn solve loop with early stop on pass
 - return candidate code and structured execution traces from `solve_problem(...)`
 
@@ -383,6 +391,8 @@ Implementation files:
 - [src/agentconductor/interfaces/planning.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/interfaces/planning.py)
 - [src/agentconductor/interfaces/api.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/interfaces/api.py)
 - [src/agentconductor/application/api.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/application/api.py)
+- [src/agentconductor/application/execution.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/application/execution.py)
 - [src/agentconductor/application/history.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/application/history.py)
 - [src/agentconductor/domain/history.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/domain/history.py)
 - [src/agentconductor/domain/models.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/domain/models.py)
+- [src/agentconductor/infrastructure/sandbox.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/infrastructure/sandbox.py)

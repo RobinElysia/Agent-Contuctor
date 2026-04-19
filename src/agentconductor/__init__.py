@@ -3,8 +3,12 @@
 from agentconductor.application.bootstrap import bootstrap_overview
 from agentconductor.domain.execution import (
     AgentExecutionResult,
+    CodeCandidate,
     ExecutionStatus,
     ResolvedAgentOutput,
+    SandboxAdapter,
+    SandboxExecutionResult,
+    SandboxTestSpec,
     StepExecutionResult,
     TestingOutcome,
     TopologyExecutionError,
@@ -34,6 +38,7 @@ from agentconductor.domain.topology import (
     TopologyStep,
     TopologyValidationError,
 )
+from agentconductor.infrastructure.sandbox import PythonSubprocessSandboxAdapter
 from agentconductor.interfaces.api import plan_problem_topology, solve_problem
 from agentconductor.interfaces.execution import execute_topology_plan
 
@@ -42,11 +47,16 @@ __all__ = [
     "AgentInvocation",
     "AgentReference",
     "AgentRole",
+    "CodeCandidate",
     "DifficultyLevel",
     "ExecutionStatus",
     "ProblemInstance",
     "ProjectOverview",
+    "PythonSubprocessSandboxAdapter",
     "ResolvedAgentOutput",
+    "SandboxAdapter",
+    "SandboxExecutionResult",
+    "SandboxTestSpec",
     "SolveState",
     "SolveStateTransitionError",
     "SolveRequest",

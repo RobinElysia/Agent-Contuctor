@@ -265,7 +265,7 @@ Out of scope:
 - production model serving
 
 ### Task ID: SBX-01
-Status: todo
+Status: done
 Depends on: TURN-01
 Scope: implement real code extraction and sandbox-backed testing integration
 Files:
@@ -289,6 +289,84 @@ Out of scope:
 - distributed sandbox orchestration
 - multi-turn policy learning
 - benchmark-scale evaluation pipelines
+
+### Task ID: JUDGE-01
+Status: todo
+Depends on: SBX-01
+Scope: replace the repository-local Python sandbox harness with a benchmark-grade judge boundary
+Files:
+- `src/agentconductor/infrastructure/`
+- `src/agentconductor/application/`
+- `src/agentconductor/domain/`
+- `tests/`
+- `docs/tech.md`
+- `API.md`
+- `README.md`
+Implementation notes:
+- keep the existing sandbox adapter boundary and extend it instead of coupling execution logic to one judge runtime
+- support richer judge inputs such as test cases, expected outputs, and resource limits
+- preserve typed mapping from judge-native outcomes into repository execution results
+- document which parts remain repository approximations if exact benchmark semantics are still unavailable
+Acceptance criteria:
+- the repository can evaluate candidate code through a judge interface richer than the current substring-based local harness
+- judge outcomes are mapped into typed testing results with explicit diagnostics
+- tests cover at least one passing run and one failing run through the new judge boundary
+- caller-facing docs explain the new judge contract and its current fidelity limits
+Out of scope:
+- distributed scheduling across multiple sandbox workers
+- benchmark-scale batch orchestration
+- training or RL policy updates
+
+### Task ID: DIST-01
+Status: todo
+Depends on: JUDGE-01
+Scope: add distributed sandbox orchestration for parallel candidate evaluation
+Files:
+- `src/agentconductor/infrastructure/`
+- `src/agentconductor/application/`
+- `src/agentconductor/domain/`
+- `tests/`
+- `docs/tech.md`
+- `README.md`
+Implementation notes:
+- separate job submission, worker execution, and result collection from judge semantics
+- keep the single-node path available for local verification and fallback
+- make concurrency, retries, and timeout handling explicit and inspectable
+- avoid introducing deployment-specific infrastructure assumptions unless the task requires them
+Acceptance criteria:
+- the repository can dispatch sandbox evaluation work through a distributed orchestration boundary
+- execution results remain typed and equivalent to the single-node judge path
+- tests or verification cover successful distributed submission and at least one failure or timeout path
+- technical docs describe worker orchestration assumptions and fallback behavior
+Out of scope:
+- benchmark-scale metrics aggregation
+- RL training integration
+- production cloud deployment hardening
+
+### Task ID: EVAL-01
+Status: todo
+Depends on: JUDGE-01
+Scope: build a benchmark-scale evaluation pipeline around the current solve and judge stack
+Files:
+- `src/agentconductor/`
+- `scripts/` if introduced
+- `tests/`
+- `docs/tech.md`
+- `README.md`
+Implementation notes:
+- keep batch-evaluation code outside the online solve path
+- define a reproducible input/output format for benchmark problems, runs, and aggregated results
+- record per-problem judge outcomes, latency, and topology metadata so later training analysis can reuse them
+- document which benchmark adapters are fully implemented and which remain placeholders
+Acceptance criteria:
+- the repository contains a runnable batch evaluation entrypoint over a dataset of problems
+- evaluation artifacts include per-problem outcomes and an aggregate summary
+- tests or verification cover dataset schema validation and one small end-to-end batch run
+- docs explain how to run and interpret the evaluation pipeline
+Out of scope:
+- distributed worker orchestration
+- RL optimization
+- exact paper leaderboard reproduction
 
 ### Task ID: TRAIN-01
 Status: todo

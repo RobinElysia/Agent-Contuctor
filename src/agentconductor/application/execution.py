@@ -6,8 +6,12 @@ from collections.abc import Callable
 
 from agentconductor.domain.execution import (
     AgentExecutionResult,
+    CodeCandidate,
     ExecutionStatus,
     ResolvedAgentOutput,
+    SandboxAdapter,
+    SandboxExecutionResult,
+    SandboxTestSpec,
     StepExecutionResult,
     TestingOutcome,
     TopologyExecutionError,
@@ -15,6 +19,7 @@ from agentconductor.domain.execution import (
 )
 from agentconductor.domain.models import ProblemInstance
 from agentconductor.domain.topology import AgentInvocation, AgentReference, AgentRole, TopologyPlan
+from agentconductor.infrastructure.sandbox import PythonSubprocessSandboxAdapter
 
 RoleHandler = Callable[
     [ProblemInstance, AgentInvocation, int, tuple[ResolvedAgentOutput, ...]],
@@ -27,10 +32,11 @@ def execute_topology(
     topology: TopologyPlan,
     *,
     registry: dict[AgentRole, RoleHandler] | None = None,
+    sandbox: SandboxAdapter | None = None,
 ) -> TopologyExecutionResult:
     """Execute a single-turn topology plan layer by layer."""
     topology.validate()
-    active_registry = registry or build_default_role_registry()
+    active_registry = registry or build_default_role_registry(sandbox=sandbox)
 
     results_by_agent: dict[tuple[int, str], AgentExecutionResult] = {}
     step_results: list[StepExecutionResult] = []
@@ -63,6 +69,7 @@ def execute_topology(
     testing_outcome = (
         final_testing_result.testing_outcome if final_testing_result else None
     )
+    sandbox_result = final_testing_result.sandbox_result if final_testing_result else None
 
     return TopologyExecutionResult(
         problem=problem,
@@ -72,18 +79,29 @@ def execute_topology(
         final_candidate_code=final_candidate_code,
         testing_outcome=testing_outcome,
         diagnostics=diagnostics,
+        sandbox_result=sandbox_result,
     )
 
 
-def build_default_role_registry() -> dict[AgentRole, RoleHandler]:
-    """Return the deterministic role registry used by the initial executor."""
+def build_default_role_registry(
+    *,
+    sandbox: SandboxAdapter | None = None,
+) -> dict[AgentRole, RoleHandler]:
+    """Return the deterministic role registry used by the executor."""
+    active_sandbox = sandbox or PythonSubprocessSandboxAdapter()
     return {
         AgentRole.RETRIEVAL: _run_retrieval_role,
         AgentRole.PLANNING: _run_planning_role,
         AgentRole.ALGORITHMIC: _run_algorithmic_role,
         AgentRole.CODING: _run_coding_role,
         AgentRole.DEBUGGING: _run_debugging_role,
-        AgentRole.TESTING: _run_testing_role,
+        AgentRole.TESTING: lambda problem, agent, step_index, consumed_outputs: _run_testing_role(
+            problem,
+            agent,
+            step_index,
+            consumed_outputs,
+            sandbox=active_sandbox,
+        ),
     }
 
 
@@ -248,20 +266,29 @@ def _run_testing_role(
     agent: AgentInvocation,
     step_index: int,
     consumed_outputs: tuple[ResolvedAgentOutput, ...],
+    *,
+    sandbox: SandboxAdapter,
 ) -> AgentExecutionResult:
-    del problem
-    candidate_code = next(
-        (output.candidate_code for output in reversed(consumed_outputs) if output.candidate_code),
-        None,
-    )
-    if candidate_code is None:
-        outcome = TestingOutcome.FAILED
+    extracted_candidate = extract_code_candidate(consumed_outputs)
+    if extracted_candidate is None:
+        outcome = TestingOutcome.NO_CANDIDATE
         diagnostics = ("No candidate code was available to test.",)
         summary = "Testing failed because no candidate code reached the final layer."
+        candidate_code = None
+        sandbox_result = SandboxExecutionResult(
+            outcome=outcome,
+            diagnostics=diagnostics,
+        )
     else:
-        outcome = TestingOutcome.PASSED
-        diagnostics = ("Deterministic testing accepted the candidate code.",)
-        summary = "Testing completed successfully for the referenced candidate code."
+        candidate_code = extracted_candidate.source_code
+        sandbox_result = sandbox.evaluate(
+            problem,
+            extracted_candidate,
+            build_sandbox_test_spec(problem),
+        )
+        outcome = sandbox_result.outcome
+        diagnostics = sandbox_result.diagnostics
+        summary = _summarize_testing_outcome(outcome)
 
     return AgentExecutionResult(
         step_index=step_index,
@@ -273,6 +300,7 @@ def _run_testing_role(
         candidate_code=candidate_code,
         diagnostics=diagnostics,
         testing_outcome=outcome,
+        sandbox_result=sandbox_result,
     )
 
 
@@ -282,6 +310,66 @@ def _extract_focus(prompt: str) -> str:
         token for token in prompt_tokens if token and token not in {"the", "a", "an", "and", "or", "to"}
     ]
     return meaningful_tokens[0] if meaningful_tokens else "problem"
+
+
+def build_sandbox_test_spec(problem: ProblemInstance) -> SandboxTestSpec:
+    """Return a narrow local test spec derived from the current problem."""
+    return SandboxTestSpec(
+        entrypoint="solve",
+        required_substrings=(_extract_focus(problem.prompt),),
+    )
+
+
+def extract_code_candidate(
+    consumed_outputs: tuple[ResolvedAgentOutput, ...],
+) -> CodeCandidate | None:
+    """Extract the last referenced Python candidate from upstream outputs."""
+    for output in reversed(consumed_outputs):
+        if not output.candidate_code:
+            continue
+        source_code = _normalize_candidate_code(output.candidate_code)
+        if source_code is None:
+            continue
+        return CodeCandidate(
+            step_index=output.step_index,
+            agent_name=output.agent_name,
+            role=output.role,
+            source_code=source_code,
+        )
+    return None
+
+
+def _normalize_candidate_code(raw_code: str) -> str | None:
+    stripped = raw_code.strip()
+    if not stripped:
+        return None
+    if not stripped.startswith("```"):
+        return stripped
+
+    lines = stripped.splitlines()
+    if len(lines) < 3:
+        return None
+    if not lines[-1].startswith("```"):
+        return None
+    return "\n".join(lines[1:-1]).strip() or None
+
+
+def _summarize_testing_outcome(outcome: TestingOutcome) -> str:
+    if outcome is TestingOutcome.PASSED:
+        return "Testing completed successfully for the referenced candidate code."
+    if outcome is TestingOutcome.WRONG_ANSWER:
+        return "Testing rejected the candidate code with a wrong-answer result."
+    if outcome is TestingOutcome.COMPILATION_ERROR:
+        return "Testing rejected the candidate code because it did not compile."
+    if outcome is TestingOutcome.RUNTIME_ERROR:
+        return "Testing rejected the candidate code because it raised at runtime."
+    if outcome is TestingOutcome.TIME_LIMIT_EXCEEDED:
+        return "Testing rejected the candidate code because it exceeded the timeout."
+    if outcome is TestingOutcome.MEMORY_LIMIT_EXCEEDED:
+        return "Testing rejected the candidate code because it exceeded memory limits."
+    if outcome is TestingOutcome.NO_CANDIDATE:
+        return "Testing could not start because no candidate code was available."
+    return "Testing rejected the candidate code."
 
 
 def _format_reference_names(consumed_outputs: tuple[ResolvedAgentOutput, ...]) -> str:

@@ -31,6 +31,8 @@ def test_execute_topology_plan_runs_valid_plan_end_to_end() -> None:
     assert result.executed_agents == plan.node_count
     assert result.final_candidate_code is not None
     assert result.testing_outcome is TestingOutcome.PASSED
+    assert result.sandbox_result is not None
+    assert result.sandbox_result.outcome is TestingOutcome.PASSED
     coder_result = result.step_results[1].agent_results[1]
     assert coder_result.agent_name == "coder_1"
     assert tuple(output.agent_name for output in coder_result.consumed_outputs) == (
@@ -53,8 +55,9 @@ def test_execute_topology_plan_preserves_testing_diagnostics() -> None:
     assert testing_result.role is AgentRole.TESTING
     assert testing_result.testing_outcome is TestingOutcome.PASSED
     assert testing_result.candidate_code == result.final_candidate_code
+    assert testing_result.sandbox_result is not None
     assert result.diagnostics == (
-        "Deterministic testing accepted the candidate code.",
+        "Local sandbox accepted the candidate code.",
     )
 
 

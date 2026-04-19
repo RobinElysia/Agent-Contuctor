@@ -1,9 +1,10 @@
-"""Typed execution contracts for single-turn topology runs."""
+"""Typed execution contracts for topology runs and sandbox evaluation."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Protocol
 
 from agentconductor.domain.models import DifficultyLevel, ProblemInstance
 from agentconductor.domain.topology import AgentReference, AgentRole
@@ -17,13 +18,67 @@ class ExecutionStatus(StrEnum):
 
 
 class TestingOutcome(StrEnum):
-    """Outcome reported by the deterministic testing role."""
+    """Outcome categories reported by the testing role.
+
+    The paper enumerates pass/fail categories such as wrong answer, runtime
+    error, compilation error, and resource-limit failures. This repository
+    keeps those categories and also preserves narrow local fallbacks for
+    missing code and pre-sandbox failures.
+    """
 
     PASSED = "passed"
     FAILED = "failed"
+    WRONG_ANSWER = "wrong_answer"
+    TIME_LIMIT_EXCEEDED = "time_limit_exceeded"
+    MEMORY_LIMIT_EXCEEDED = "memory_limit_exceeded"
+    RUNTIME_ERROR = "runtime_error"
+    COMPILATION_ERROR = "compilation_error"
+    NO_CANDIDATE = "no_candidate"
 
 
 TestingOutcome.__test__ = False
+
+
+@dataclass(frozen=True, slots=True)
+class CodeCandidate:
+    """Extracted candidate code passed into a sandbox adapter."""
+
+    step_index: int
+    agent_name: str
+    role: AgentRole
+    source_code: str
+    language: str = "python"
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxTestSpec:
+    """Local executable test spec for a candidate solution."""
+
+    entrypoint: str
+    required_substrings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class SandboxExecutionResult:
+    """Structured outcome returned by a sandbox adapter."""
+
+    outcome: TestingOutcome
+    diagnostics: tuple[str, ...]
+    stdout: str = ""
+    stderr: str = ""
+    exit_code: int | None = None
+
+
+class SandboxAdapter(Protocol):
+    """Narrow boundary for runtime-specific candidate evaluation."""
+
+    def evaluate(
+        self,
+        problem: ProblemInstance,
+        candidate: CodeCandidate,
+        spec: SandboxTestSpec,
+    ) -> SandboxExecutionResult:
+        """Run sandbox-backed evaluation for one code candidate."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +105,7 @@ class AgentExecutionResult:
     candidate_code: str | None = None
     diagnostics: tuple[str, ...] = ()
     testing_outcome: TestingOutcome | None = None
+    sandbox_result: SandboxExecutionResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +127,7 @@ class TopologyExecutionResult:
     final_candidate_code: str | None
     testing_outcome: TestingOutcome | None
     diagnostics: tuple[str, ...]
+    sandbox_result: SandboxExecutionResult | None = None
 
     @property
     def executed_steps(self) -> int:

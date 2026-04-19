@@ -84,6 +84,6 @@ def solve_request(request: SolveRequest) -> SolveResult:
         notes=(
             "This API performs deterministic topology planning plus bounded multi-turn execution.",
             "Later turns consume typed testing feedback through a local revision-input contract.",
-            "Testing outcomes remain repository-local heuristics until sandbox integration exists.",
+            "Testing outcomes now come from a repository-local Python sandbox adapter.",
         ),
     )
