@@ -32,6 +32,9 @@ class TestingFeedback:
     candidate_code: str | None
 
 
+TestingFeedback.__test__ = False
+
+
 @dataclass(frozen=True, slots=True)
 class SolveTurnRecord:
     """One completed solve turn and its revision-relevant artifacts."""
@@ -88,4 +91,3 @@ class SolveState:
 
 class SolveStateTransitionError(ValueError):
     """Raised when a solve-state transition violates repository contracts."""
-

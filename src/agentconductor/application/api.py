@@ -2,8 +2,15 @@
 
 from agentconductor.application.bootstrap import bootstrap_overview
 from agentconductor.application.execution import execute_topology
-from agentconductor.application.history import append_turn_result, initialize_solve_state
-from agentconductor.application.orchestrator import plan_topology_for_problem
+from agentconductor.application.history import (
+    append_turn_result,
+    build_revision_input,
+    initialize_solve_state,
+)
+from agentconductor.application.orchestrator import (
+    plan_topology_for_problem,
+    revise_topology_for_feedback,
+)
 from agentconductor.domain.execution import TestingOutcome
 from agentconductor.domain.models import (
     DifficultyLevel,
@@ -46,6 +53,16 @@ def solve_request(request: SolveRequest) -> SolveResult:
     topology = plan_topology_for_problem(problem)
     execution = execute_topology(problem, topology)
     solve_state = append_turn_result(solve_state, topology=topology, execution=execution)
+
+    while (
+        execution.testing_outcome is not TestingOutcome.PASSED
+        and solve_state.can_continue
+    ):
+        revision_input = build_revision_input(solve_state)
+        topology = revise_topology_for_feedback(revision_input)
+        execution = execute_topology(problem, topology)
+        solve_state = append_turn_result(solve_state, topology=topology, execution=execution)
+
     status = (
         SolveStatus.COMPLETED
         if execution.testing_outcome is TestingOutcome.PASSED
@@ -65,8 +82,8 @@ def solve_request(request: SolveRequest) -> SolveResult:
         testing_outcome=execution.testing_outcome,
         solve_state=solve_state,
         notes=(
-            "This API performs deterministic topology planning plus single-turn execution.",
-            "A typed solve-state contract now preserves turn history for later revision logic.",
+            "This API performs deterministic topology planning plus bounded multi-turn execution.",
+            "Later turns consume typed testing feedback through a local revision-input contract.",
             "Testing outcomes remain repository-local heuristics until sandbox integration exists.",
         ),
     )

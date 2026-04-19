@@ -4,14 +4,15 @@ This document describes the current stable Python API exposed by the repository 
 
 The API is still in an early milestone. It currently provides:
 
-- a typed solve entrypoint with deterministic planning and single-turn execution
+- a typed solve entrypoint with deterministic planning and bounded multi-turn execution
 - a typed multi-turn solve-state contract that records per-turn history
 - a deterministic topology-planning entrypoint
 - a deterministic single-turn topology-execution entrypoint
 - typed topology schema objects for single-turn plans
 - validation rules for topology structure before execution
 
-The repository does not yet execute the full multi-turn AgentConductor method.
+The repository now supports a local bounded multi-turn solve loop, but it still
+does not implement the paper's full sandbox-backed inference runtime.
 
 ## Public Entry Points
 
@@ -74,7 +75,7 @@ from agentconductor import (
 
 ### `solve_problem(problem, *, max_turns=None) -> SolveResult`
 
-Plan and execute a structured single-turn solve for a problem instance.
+Plan and execute a structured bounded multi-turn solve for a problem instance.
 
 Parameters:
 
@@ -86,9 +87,10 @@ Behavior:
 - uses the explicit difficulty from `problem` when present
 - defaults missing difficulty to `DifficultyLevel.MEDIUM`
 - validates the turn budget against the current baseline limit
-- generates a deterministic single-turn topology
-- executes that topology with the current local role registry
-- returns candidate code, role trace, and final testing outcome
+- generates a deterministic first-turn topology
+- executes plan -> evaluate in a bounded loop up to the current turn budget
+- consumes typed prior-turn testing feedback when planning a later turn
+- returns the final candidate code, role trace, and final testing outcome
 
 Returned `SolveResult` fields:
 
@@ -107,7 +109,7 @@ Returned `SolveResult` fields:
 Implementation inference:
 
 - the medium-difficulty fallback is an engineering inference until the repository implements the paper's real difficulty inference mechanism
-- the current solve path is limited to one deterministic turn; it records turn history now, but does not yet revise topology from that history
+- later-turn revision remains deterministic and repository-local until a learned orchestrator exists
 
 ## Multi-Turn Solve-State Contract
 
@@ -359,7 +361,6 @@ The repository currently does not:
 
 - generate topology YAML from an orchestrator
 - run code in a sandbox
-- revise topology over multiple turns
 
 It currently does:
 
@@ -368,7 +369,9 @@ It currently does:
 - parse single-turn topologies from plain mappings
 - validate paper-aligned topology structure
 - emit deterministic topology plans for supported difficulty tiers
+- emit deterministic revised topologies from prior-turn feedback
 - execute single-turn topologies with deterministic role handlers
+- run a bounded multi-turn solve loop with early stop on pass
 - return candidate code and structured execution traces from `solve_problem(...)`
 
 ## Source References

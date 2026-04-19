@@ -6,13 +6,13 @@ The repository currently provides:
 
 - a `src/`-layout Python package managed with `uv`
 - typed domain models derived from the paper distillation
-- a stable Python solve API for deterministic planning plus single-turn execution
+- a stable Python solve API for deterministic planning plus bounded multi-turn execution
 - a typed multi-turn solve-state contract for turn history and later revision
 - a deterministic topology planner that emits validated single-turn plans
 - a deterministic single-turn graph executor for validated plans
 - focused tests for the bootstrap and API layers
 
-The repository does not yet implement the full paper runtime. The current API performs one deterministic planning-and-execution turn, but it does not yet support sandbox-backed evaluation or multi-turn topology revision.
+The repository does not yet implement the full paper runtime. The current API can run up to the configured turn budget with deterministic topology revision, but it still does not support sandbox-backed evaluation.
 
 ## Current Status
 
@@ -30,7 +30,6 @@ Not yet implemented:
 
 - topology YAML generation
 - sandbox-backed code execution
-- multi-turn topology refinement
 - training or RL reproduction
 
 ## Project Layout
@@ -173,5 +172,5 @@ uv run pytest tests/test_bootstrap.py tests/test_api.py tests/test_topology.py t
 
 ## Next Likely Steps
 
-- add structured execution feedback and turn history
-- introduce multi-turn solve revision
+- integrate real sandbox-backed testing
+- add training and RL reproduction paths

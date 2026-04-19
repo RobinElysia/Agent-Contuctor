@@ -239,7 +239,7 @@ Out of scope:
 - training infrastructure
 
 ### Task ID: TURN-02
-Status: todo
+Status: done
 Depends on: TURN-01
 Scope: implement multi-turn topology revision and stopping logic for solve requests
 Files:

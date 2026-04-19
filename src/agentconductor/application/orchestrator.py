@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
+from agentconductor.domain.history import TopologyRevisionInput
 from agentconductor.domain.models import DifficultyLevel, ProblemInstance
 from agentconductor.domain.topology import (
     AgentInvocation,
@@ -68,6 +69,29 @@ def plan_topology_for_problem(problem: ProblemInstance) -> TopologyPlan:
     if difficulty is DifficultyLevel.HARD:
         return _hard_topology(shape)
     return _medium_topology(shape)
+
+
+def revise_topology_for_feedback(revision: TopologyRevisionInput) -> TopologyPlan:
+    """Return a deterministic revised topology for a failed prior turn.
+
+    Inference:
+    The paper states that later turns consume prior feedback and history, but it
+    does not define a concrete repository-local revision policy. This function
+    implements an inspectable fallback policy that increases debugging focus and
+    preserves explicit dependency on the prior testing diagnostics.
+    """
+    shape = infer_problem_shape(revision.problem)
+    diagnostics = " ".join(revision.testing_feedback.diagnostics).lower()
+    requires_retrieval = shape is ProblemShape.KNOWLEDGE_INTENSIVE or any(
+        keyword in diagnostics
+        for keyword in ("constraint", "graph", "path", "dp", "dynamic programming")
+    )
+
+    if revision.selected_difficulty is DifficultyLevel.EASY:
+        return _easy_revision_topology(revision.turn_index)
+    if revision.selected_difficulty is DifficultyLevel.HARD:
+        return _hard_revision_topology(revision.turn_index, requires_retrieval)
+    return _medium_revision_topology(revision.turn_index, requires_retrieval)
 
 
 def _easy_topology() -> TopologyPlan:
@@ -249,6 +273,177 @@ def _hard_topology(shape: ProblemShape) -> TopologyPlan:
                         name="tester_2",
                         role=AgentRole.TESTING,
                         refs=test_refs,
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
+def _easy_revision_topology(turn_index: int) -> TopologyPlan:
+    return TopologyPlan(
+        difficulty=DifficultyLevel.EASY,
+        steps=(
+            TopologyStep(
+                index=0,
+                agents=(AgentInvocation(name=f"planner_t{turn_index}_0", role=AgentRole.PLANNING),),
+            ),
+            TopologyStep(
+                index=1,
+                agents=(
+                    AgentInvocation(
+                        name=f"coder_t{turn_index}_1",
+                        role=AgentRole.CODING,
+                        refs=(
+                            AgentReference(step_index=0, agent_name=f"planner_t{turn_index}_0"),
+                        ),
+                    ),
+                ),
+            ),
+            TopologyStep(
+                index=2,
+                agents=(
+                    AgentInvocation(
+                        name=f"debugger_t{turn_index}_2",
+                        role=AgentRole.DEBUGGING,
+                        refs=(
+                            AgentReference(step_index=1, agent_name=f"coder_t{turn_index}_1"),
+                        ),
+                    ),
+                ),
+            ),
+            TopologyStep(
+                index=3,
+                agents=(
+                    AgentInvocation(
+                        name=f"tester_t{turn_index}_3",
+                        role=AgentRole.TESTING,
+                        refs=(
+                            AgentReference(step_index=0, agent_name=f"planner_t{turn_index}_0"),
+                            AgentReference(step_index=2, agent_name=f"debugger_t{turn_index}_2"),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
+def _medium_revision_topology(turn_index: int, requires_retrieval: bool) -> TopologyPlan:
+    step_zero_agents = [AgentInvocation(name=f"planner_t{turn_index}_0", role=AgentRole.PLANNING)]
+    if requires_retrieval:
+        step_zero_agents.insert(
+            0, AgentInvocation(name=f"retrieval_t{turn_index}_0", role=AgentRole.RETRIEVAL)
+        )
+
+    step_one_refs = [AgentReference(step_index=0, agent_name=f"planner_t{turn_index}_0")]
+    if requires_retrieval:
+        step_one_refs.insert(
+            0, AgentReference(step_index=0, agent_name=f"retrieval_t{turn_index}_0")
+        )
+
+    return TopologyPlan(
+        difficulty=DifficultyLevel.MEDIUM,
+        steps=(
+            TopologyStep(index=0, agents=tuple(step_zero_agents)),
+            TopologyStep(
+                index=1,
+                agents=(
+                    AgentInvocation(
+                        name=f"algorithmic_t{turn_index}_1",
+                        role=AgentRole.ALGORITHMIC,
+                        refs=tuple(step_one_refs),
+                    ),
+                    AgentInvocation(
+                        name=f"coder_t{turn_index}_1",
+                        role=AgentRole.CODING,
+                        refs=tuple(step_one_refs),
+                    ),
+                ),
+            ),
+            TopologyStep(
+                index=2,
+                agents=(
+                    AgentInvocation(
+                        name=f"debugger_t{turn_index}_2",
+                        role=AgentRole.DEBUGGING,
+                        refs=(
+                            AgentReference(step_index=1, agent_name=f"algorithmic_t{turn_index}_1"),
+                            AgentReference(step_index=1, agent_name=f"coder_t{turn_index}_1"),
+                        ),
+                    ),
+                ),
+            ),
+            TopologyStep(
+                index=3,
+                agents=(
+                    AgentInvocation(
+                        name=f"tester_t{turn_index}_3",
+                        role=AgentRole.TESTING,
+                        refs=(
+                            AgentReference(step_index=1, agent_name=f"coder_t{turn_index}_1"),
+                            AgentReference(step_index=2, agent_name=f"debugger_t{turn_index}_2"),
+                        ),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+
+def _hard_revision_topology(turn_index: int, requires_retrieval: bool) -> TopologyPlan:
+    step_zero_agents = [AgentInvocation(name=f"planner_t{turn_index}_0", role=AgentRole.PLANNING)]
+    if requires_retrieval:
+        step_zero_agents.insert(
+            0, AgentInvocation(name=f"retrieval_t{turn_index}_0", role=AgentRole.RETRIEVAL)
+        )
+
+    step_zero_refs = tuple(
+        AgentReference(step_index=0, agent_name=agent.name) for agent in step_zero_agents
+    )
+
+    return TopologyPlan(
+        difficulty=DifficultyLevel.HARD,
+        steps=(
+            TopologyStep(index=0, agents=tuple(step_zero_agents)),
+            TopologyStep(
+                index=1,
+                agents=(
+                    AgentInvocation(
+                        name=f"algorithmic_t{turn_index}_1",
+                        role=AgentRole.ALGORITHMIC,
+                        refs=step_zero_refs,
+                    ),
+                    AgentInvocation(
+                        name=f"coder_t{turn_index}_1",
+                        role=AgentRole.CODING,
+                        refs=step_zero_refs,
+                    ),
+                ),
+            ),
+            TopologyStep(
+                index=2,
+                agents=(
+                    AgentInvocation(
+                        name=f"debugger_t{turn_index}_2",
+                        role=AgentRole.DEBUGGING,
+                        refs=(
+                            AgentReference(step_index=1, agent_name=f"algorithmic_t{turn_index}_1"),
+                            AgentReference(step_index=1, agent_name=f"coder_t{turn_index}_1"),
+                        ),
+                    ),
+                ),
+            ),
+            TopologyStep(
+                index=3,
+                agents=(
+                    AgentInvocation(
+                        name=f"tester_t{turn_index}_3",
+                        role=AgentRole.TESTING,
+                        refs=(
+                            AgentReference(step_index=1, agent_name=f"coder_t{turn_index}_1"),
+                            AgentReference(step_index=2, agent_name=f"debugger_t{turn_index}_2"),
+                        ),
                     ),
                 ),
             ),

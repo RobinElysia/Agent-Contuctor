@@ -3,7 +3,13 @@ from agentconductor import (
     ProblemInstance,
     plan_problem_topology,
 )
-from agentconductor.application.orchestrator import ProblemShape, infer_problem_shape
+from agentconductor.application.orchestrator import (
+    ProblemShape,
+    infer_problem_shape,
+    revise_topology_for_feedback,
+)
+from agentconductor.domain.execution import ExecutionStatus, TestingOutcome
+from agentconductor.domain.history import TestingFeedback, TopologyRevisionInput
 from agentconductor.domain.topology import AgentRole
 
 
@@ -86,3 +92,34 @@ def test_plan_problem_topology_defaults_missing_difficulty_to_medium() -> None:
     )
 
     assert plan.difficulty is DifficultyLevel.MEDIUM
+
+
+def test_revise_topology_for_feedback_adds_debugging_turn_for_failed_medium_problem() -> None:
+    problem = ProblemInstance(
+        identifier="medium-revise",
+        prompt="Solve a graph shortest path problem under tight constraints.",
+        difficulty=DifficultyLevel.MEDIUM,
+    )
+
+    revised = revise_topology_for_feedback(
+        TopologyRevisionInput(
+            problem=problem,
+            selected_difficulty=DifficultyLevel.MEDIUM,
+            turn_index=1,
+            prior_topology=plan_problem_topology(problem),
+            prior_execution_status=ExecutionStatus.COMPLETED,
+            testing_feedback=TestingFeedback(
+                outcome=TestingOutcome.FAILED,
+                diagnostics=("Wrong answer on graph constraint edge case.",),
+                candidate_code="def solve():\n    pass\n",
+            ),
+            remaining_turns=1,
+        )
+    )
+
+    assert revised.difficulty is DifficultyLevel.MEDIUM
+    assert len(revised.steps) == 4
+    assert revised.steps[0].agents[0].role is AgentRole.RETRIEVAL
+    assert revised.steps[2].agents[0].role is AgentRole.DEBUGGING
+    assert revised.steps[3].agents[0].role is AgentRole.TESTING
+    assert revised.steps[3].agents[0].refs[-1].agent_name == "debugger_t1_2"
