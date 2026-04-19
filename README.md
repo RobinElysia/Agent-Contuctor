@@ -7,6 +7,7 @@ The repository currently provides:
 - a `src/`-layout Python package managed with `uv`
 - typed domain models derived from the paper distillation
 - a stable Python solve API for deterministic planning plus single-turn execution
+- a typed multi-turn solve-state contract for turn history and later revision
 - a deterministic topology planner that emits validated single-turn plans
 - a deterministic single-turn graph executor for validated plans
 - focused tests for the bootstrap and API layers
@@ -130,6 +131,7 @@ print(topology.steps)
 print(result.status)
 print(result.candidate_solution)
 print(result.testing_outcome)
+print(result.solve_state.completed_turns)
 print(execution.testing_outcome)
 ```
 
@@ -143,6 +145,7 @@ The planning API can return a typed `TopologyPlan`, and `solve_problem(...)` now
 - a structured execution result
 - candidate solution content
 - final testing outcome
+- a typed solve state with turn history and revision-ready feedback
 
 The execution API can return a typed `TopologyExecutionResult` with:
 

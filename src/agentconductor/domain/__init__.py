@@ -9,6 +9,14 @@ from agentconductor.domain.execution import (
     TopologyExecutionError,
     TopologyExecutionResult,
 )
+from agentconductor.domain.history import (
+    SolveState,
+    SolveStateTransitionError,
+    SolveTurnRecord,
+    StopReason,
+    TestingFeedback,
+    TopologyRevisionInput,
+)
 from agentconductor.domain.topology import (
     AgentInvocation,
     AgentReference,
@@ -25,11 +33,17 @@ __all__ = [
     "AgentRole",
     "ExecutionStatus",
     "ResolvedAgentOutput",
+    "SolveState",
+    "SolveStateTransitionError",
+    "SolveTurnRecord",
     "StepExecutionResult",
+    "StopReason",
     "TestingOutcome",
+    "TestingFeedback",
     "TopologyPlan",
     "TopologyExecutionError",
     "TopologyExecutionResult",
+    "TopologyRevisionInput",
     "TopologyStep",
     "TopologyValidationError",
 ]

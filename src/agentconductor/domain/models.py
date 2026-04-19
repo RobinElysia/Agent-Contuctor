@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from agentconductor.domain.execution import TestingOutcome, TopologyExecutionResult
+    from agentconductor.domain.history import SolveState
     from agentconductor.domain.topology import TopologyPlan
 
 
@@ -68,4 +69,5 @@ class SolveResult:
     execution: TopologyExecutionResult
     candidate_solution: str | None
     testing_outcome: TestingOutcome | None
+    solve_state: SolveState
     notes: tuple[str, ...]

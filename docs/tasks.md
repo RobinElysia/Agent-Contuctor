@@ -215,7 +215,7 @@ Out of scope:
 - production-grade model integration
 
 ### Task ID: TURN-01
-Status: todo
+Status: done
 Depends on: API-02
 Scope: define multi-turn solve state, history, and topology-revision contracts
 Files:

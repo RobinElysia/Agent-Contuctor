@@ -1,7 +1,14 @@
 import pytest
 
 import agentconductor.application.api as api_module
-from agentconductor import DifficultyLevel, ProblemInstance, SolveStatus, TestingOutcome, solve_problem
+from agentconductor import (
+    DifficultyLevel,
+    ProblemInstance,
+    SolveStatus,
+    StopReason,
+    TestingOutcome,
+    solve_problem,
+)
 from agentconductor.domain.execution import (
     ExecutionStatus,
     StepExecutionResult,
@@ -28,6 +35,10 @@ def test_solve_problem_returns_typed_boundary_result() -> None:
     assert result.testing_outcome is TestingOutcome.PASSED
     assert result.execution.status is ExecutionStatus.COMPLETED
     assert result.topology.difficulty is DifficultyLevel.EASY
+    assert result.solve_state.completed_turns == 1
+    assert result.solve_state.latest_turn is not None
+    assert result.solve_state.latest_turn.topology is result.topology
+    assert result.solve_state.stop_reason is StopReason.SOLVED
     assert result.available_roles == (
         "retrieval",
         "planning",
@@ -52,6 +63,8 @@ def test_solve_problem_uses_inferred_baseline_defaults() -> None:
     assert result.max_nodes == 7
     assert result.status is SolveStatus.COMPLETED
     assert result.execution.executed_steps >= 1
+    assert result.solve_state.remaining_turns == 0
+    assert result.solve_state.stop_reason is StopReason.SOLVED
 
 
 def test_solve_problem_rejects_invalid_turn_budget() -> None:
@@ -110,6 +123,8 @@ def test_solve_problem_returns_failure_when_execution_fails(
     assert result.status is SolveStatus.FAILED
     assert result.candidate_solution is None
     assert result.testing_outcome is TestingOutcome.FAILED
+    assert result.solve_state.completed_turns == 1
+    assert result.solve_state.stop_reason is None
     assert result.execution.diagnostics == (
         "Synthetic failure for API-path verification.",
     )

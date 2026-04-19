@@ -5,6 +5,7 @@ This document describes the current stable Python API exposed by the repository 
 The API is still in an early milestone. It currently provides:
 
 - a typed solve entrypoint with deterministic planning and single-turn execution
+- a typed multi-turn solve-state contract that records per-turn history
 - a deterministic topology-planning entrypoint
 - a deterministic single-turn topology-execution entrypoint
 - typed topology schema objects for single-turn plans
@@ -37,6 +38,12 @@ Other public types:
 - `agentconductor.ExecutionStatus`
 - `agentconductor.TestingOutcome`
 - `agentconductor.TopologyExecutionError`
+- `agentconductor.SolveState`
+- `agentconductor.SolveTurnRecord`
+- `agentconductor.TestingFeedback`
+- `agentconductor.TopologyRevisionInput`
+- `agentconductor.StopReason`
+- `agentconductor.SolveStateTransitionError`
 - `agentconductor.ProblemInstance`
 - `agentconductor.DifficultyLevel`
 - `agentconductor.SolveRequest`
@@ -94,12 +101,87 @@ Returned `SolveResult` fields:
 - `execution`
 - `candidate_solution`
 - `testing_outcome`
+- `solve_state`
 - `notes`
 
 Implementation inference:
 
 - the medium-difficulty fallback is an engineering inference until the repository implements the paper's real difficulty inference mechanism
-- the current solve path is limited to one deterministic turn; it does not yet revise topology from feedback history
+- the current solve path is limited to one deterministic turn; it records turn history now, but does not yet revise topology from that history
+
+## Multi-Turn Solve-State Contract
+
+The repository now exposes a typed solve-state object so later multi-turn logic
+can compose around the current single-turn executor without changing earlier
+execution contracts.
+
+### `SolveState`
+
+```python
+SolveState(
+    problem: ProblemInstance,
+    selected_difficulty: DifficultyLevel,
+    max_turns: int,
+    max_nodes: int,
+    available_roles: tuple[str, ...],
+    turns: tuple[SolveTurnRecord, ...] = (),
+    stop_reason: StopReason | None = None,
+)
+```
+
+Properties:
+
+- `completed_turns`
+- `remaining_turns`
+- `can_continue`
+- `latest_turn`
+
+### `SolveTurnRecord`
+
+```python
+SolveTurnRecord(
+    turn_index: int,
+    topology: TopologyPlan,
+    execution: TopologyExecutionResult,
+    testing_feedback: TestingFeedback,
+)
+```
+
+### `TestingFeedback`
+
+```python
+TestingFeedback(
+    outcome: TestingOutcome | None,
+    diagnostics: tuple[str, ...],
+    candidate_code: str | None,
+)
+```
+
+### `TopologyRevisionInput`
+
+```python
+TopologyRevisionInput(
+    problem: ProblemInstance,
+    selected_difficulty: DifficultyLevel,
+    turn_index: int,
+    prior_topology: TopologyPlan,
+    prior_execution_status: ExecutionStatus,
+    testing_feedback: TestingFeedback,
+    remaining_turns: int,
+)
+```
+
+### `StopReason`
+
+Enum values:
+
+- `solved`
+- `turn_budget_exhausted`
+
+Implementation inference:
+
+- the paper describes global history and testing feedback, but not a repository-level typed state object
+- `TopologyRevisionInput` is a repository-local contract so later revision logic can consume structured prior-turn artifacts instead of raw strings only
 
 ## Topology Execution API
 
@@ -282,6 +364,7 @@ The repository currently does not:
 It currently does:
 
 - expose typed topology contracts
+- expose typed multi-turn state and revision-input contracts
 - parse single-turn topologies from plain mappings
 - validate paper-aligned topology structure
 - emit deterministic topology plans for supported difficulty tiers
@@ -297,4 +380,6 @@ Implementation files:
 - [src/agentconductor/interfaces/planning.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/interfaces/planning.py)
 - [src/agentconductor/interfaces/api.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/interfaces/api.py)
 - [src/agentconductor/application/api.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/application/api.py)
+- [src/agentconductor/application/history.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/application/history.py)
+- [src/agentconductor/domain/history.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/domain/history.py)
 - [src/agentconductor/domain/models.py](/D:/code/PaperCreate/AgentConductor/src/agentconductor/domain/models.py)
