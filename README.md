@@ -28,6 +28,7 @@ Completed milestones:
 - `JUDGE-01`: richer subprocess judge boundary with explicit test cases and soft resource limits
 - `JUDGE-02`: stricter judge normalization and typed per-case verdict reporting
 - `SBX-02`: stronger per-case subprocess enforcement for wall-clock limits, with platform-aware CPU and memory controls
+- `SBX-03`: Windows Job Object-backed worker binding for hard memory limits where the host runtime permits dedicated job assignment
 
 Not yet implemented:
 
@@ -177,6 +178,12 @@ uv run pytest
 - Wall-clock limits are now enforced as hard per-case subprocess timeouts.
 - On platforms that expose `resource` limits, the judge also applies OS-level
   CPU and address-space limits inside the worker process.
+- On Windows, the judge now tries to attach each worker to a dedicated Job
+  Object and hard-enforce `memory_limit_bytes` at the process level.
+- Some host Windows runtimes already place the current process tree inside a
+  controlling Job that forbids rebinding child processes. In that case the
+  repository keeps wall-clock enforcement, reports explicit diagnostics, and
+  falls back to the existing approximate memory path.
 - On platforms without those primitives, memory enforcement falls back to traced
   Python allocations and remains approximate.
 - The judge still normalizes line endings and trailing line whitespace in a more

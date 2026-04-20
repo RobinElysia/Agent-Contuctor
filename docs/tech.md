@@ -72,6 +72,9 @@ The exact folder names may evolve, but the separation of responsibilities must r
 - When sandbox resource limits are platform-dependent, docs must distinguish
   hard subprocess or OS-enforced guarantees from repository-local fallback
   approximations such as traced-memory checks.
+- Windows-specific sandbox paths should keep Job Object details inside
+  infrastructure helpers and document when host-level job constraints force an
+  explicit downgrade back to wall-clock-only hard enforcement.
 
 ## Verification Rules
 

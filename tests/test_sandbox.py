@@ -1,3 +1,8 @@
+import subprocess
+import sys
+
+import pytest
+
 from agentconductor import (
     CodeCandidate,
     AgentRole,
@@ -7,6 +12,11 @@ from agentconductor import (
     PythonSubprocessJudgeAdapter,
     SandboxTestSpec,
     TestingOutcome,
+)
+from agentconductor.infrastructure.windows_job import (
+    BoundProcessContext,
+    WindowsJobObjectBinder,
+    build_process_limit_binder,
 )
 
 
@@ -132,3 +142,66 @@ def test_python_subprocess_judge_adapter_enforces_hard_wall_clock_limit() -> Non
     assert len(result.case_results) == 1
     assert result.case_results[0].name == "infinite-loop"
     assert result.case_results[0].outcome is TestingOutcome.TIME_LIMIT_EXCEEDED
+
+
+def test_windows_job_object_classification_maps_missing_result_to_memory_limit() -> None:
+    context = BoundProcessContext(
+        platform="win32",
+        hard_memory_limit=True,
+        hard_cpu_limit=False,
+        hard_wall_time_limit=False,
+        assigned_to_job=True,
+        memory_limit_bytes=1024,
+        peak_process_memory_used=1024,
+    )
+
+    outcome, diagnostics = context.classify_missing_result(return_code=1)
+
+    assert outcome is TestingOutcome.MEMORY_LIMIT_EXCEEDED
+    assert diagnostics == (
+        "Windows Job Object enforcement stopped the worker near the configured process memory limit before the harness emitted a result.",
+    )
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows Job Objects are only available on Windows.")
+def test_windows_job_object_binder_assigns_worker_to_job() -> None:
+    binder = build_process_limit_binder()
+    assert isinstance(binder, WindowsJobObjectBinder)
+
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            "import time; time.sleep(0.05)",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        creationflags=getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0),
+    )
+    context = None
+    try:
+        context = binder.bind(
+            process_pid=process.pid,
+            resource_limits=JudgeResourceLimits(memory_limit_bytes=64 * 1024 * 1024),
+        )
+        process.communicate(timeout=1.0)
+        context.observe_process_exit()
+        assert context.platform == "win32"
+        assert context.memory_limit_bytes == 64 * 1024 * 1024
+        if context.assigned_to_job:
+            assert context.hard_memory_limit is True
+            assert context.binding_diagnostics == (
+                "Windows Job Object enforced a per-process memory limit.",
+            )
+        else:
+            assert context.hard_memory_limit is False
+            assert context.binding_diagnostics == (
+                "Windows Job Object binding was unavailable in this host runtime; wall-clock enforcement remains active but hard memory enforcement could not be attached.",
+            )
+    finally:
+        if context is not None:
+            context.close()
+        if process.poll() is None:
+            process.kill()
+        process.communicate()

@@ -372,7 +372,7 @@ Out of scope:
 - training changes
 
 ### Task ID: SBX-03
-Status: todo
+Status: done
 Depends on: SBX-02
 Scope: add Windows Job Object-backed resource enforcement for sandbox judge workers
 Files:
@@ -442,6 +442,58 @@ Out of scope:
 - CI service deployment
 - external package mirror management
 - non-Python toolchain setup
+
+### Task ID: SBX-04
+Status: todo
+Depends on: SBX-03
+Scope: improve Windows hard-memory enforcement reliability when the host runtime already runs inside an outer Job
+Files:
+- `src/agentconductor/infrastructure/`
+- `tests/`
+- `docs/tech.md`
+- `API.md`
+- `README.md`
+Implementation notes:
+- detect whether the current host runtime prevents rebinding child processes into a dedicated Job Object
+- introduce an explicit launcher strategy for Windows workers so breakaway-capable child creation is attempted before plain subprocess fallback
+- preserve the narrow sandbox adapter boundary; keep Win32 and launcher details inside infrastructure
+- make the downgrade path explicit and inspectable so callers can distinguish "hard memory enforcement attached" from "host runtime forbids attachment"
+- prefer classification evidence from process creation flags, bind results, and host-job diagnostics rather than generic stderr heuristics
+- document which Windows runtime environments are expected to allow hard memory enforcement and which are expected to degrade
+Acceptance criteria:
+- the judge can explicitly report whether Windows hard memory enforcement was attached or downgraded
+- tests cover at least one downgraded host-runtime path and one successful binder-path seam
+- caller-facing docs describe the Windows reliability boundary instead of treating hard memory enforcement as uniformly available
+Out of scope:
+- CPU quota enforcement
+- non-Windows sandbox changes
+- distributed orchestration
+
+### Task ID: SBX-05
+Status: todo
+Depends on: SBX-03
+Scope: add a verified Windows CPU-limit enforcement strategy or explicitly codify its absence behind a typed capability boundary
+Files:
+- `src/agentconductor/infrastructure/`
+- `src/agentconductor/domain/`
+- `tests/`
+- `docs/tech.md`
+- `API.md`
+- `README.md`
+Implementation notes:
+- evaluate whether Windows Job Objects should use CPU rate control, per-job user time accounting, or remain unsupported
+- do not claim parity with POSIX `RLIMIT_CPU` unless the chosen Windows mechanism can be verified with stable tests
+- if no stable strategy is found, add an explicit capability model so Windows CPU enforcement is reported as unsupported rather than implicitly approximated
+- keep `wall_time_seconds` as the only guaranteed hard timing control until Windows CPU semantics are proven
+- document the semantic difference between throttling, accounting, and hard time-limit termination
+Acceptance criteria:
+- the repository either implements a verified Windows CPU-limit path or exposes an explicit typed unsupported/provisional capability
+- tests cover the chosen behavior or the unsupported-capability contract
+- docs clearly separate hard wall-clock guarantees from Windows CPU-limit semantics
+Out of scope:
+- benchmark integration
+- training or evaluation pipeline work
+- Linux or POSIX CPU-limit redesign
 
 ### Task ID: DIST-01
 Status: todo

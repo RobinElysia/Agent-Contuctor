@@ -82,6 +82,13 @@ class JudgeResourceLimits:
     `wall_time_seconds` is enforced through the subprocess boundary. CPU and
     memory limits may be enforced through stronger OS primitives on supported
     runtimes and otherwise fall back to repository-local approximations.
+
+    Current implementation inference:
+    - POSIX runtimes may use `resource` CPU and address-space limits.
+    - Windows targets hard memory enforcement through Job Objects when the host
+      runtime allows the worker to be rebound into a dedicated job.
+    - Windows CPU accounting remains provisional and is not yet claimed to be
+      equivalent to POSIX `RLIMIT_CPU`.
     """
 
     cpu_time_seconds: float = 1.0

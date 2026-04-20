@@ -236,14 +236,17 @@ Current benchmark-aligned semantics:
 - string comparison normalizes line endings and ignores trailing whitespace at line boundaries, which is closer to common benchmark judge behavior than the earlier full `strip()` comparison
 - aggregate outcomes still map into the repository's typed `TestingOutcome` contract
 - wall-clock limits are enforced per case at the subprocess boundary instead of only within one long-lived in-process harness
+- on Windows, the judge now routes worker launch through a Job Object binding seam and targets hard process-memory limits through `memory_limit_bytes` when the host runtime permits dedicated job assignment
 
 Current fidelity limits:
 
 - the repository judge is still local and Python-only
 - entrypoint and invocation semantics are still repository-defined rather than imported from a real benchmark harness
 - wall-clock handling is enforced by the subprocess boundary
-- CPU and memory limits use OS-level `resource` controls only on supported platforms
-- on runtimes without those controls, memory limits fall back to traced Python allocations and remain approximate
+- POSIX CPU and memory limits use OS-level `resource` controls only on supported platforms
+- Windows hard memory enforcement depends on whether the host runtime allows the worker to be rebound into a dedicated Job Object
+- when Windows Job Object binding is unavailable, the judge keeps hard wall-clock enforcement and returns explicit platform diagnostics instead of claiming hard memory isolation
+- on runtimes without usable OS-level memory controls, memory limits fall back to traced Python allocations and remain approximate
 - output normalization is still a repository-level inference rather than a benchmark-specific ruleset
 - exact benchmark-specific semantics, datasets, and multi-language support are still out of scope for this milestone
 

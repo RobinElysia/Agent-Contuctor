@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from agentconductor.domain.execution import (
@@ -17,6 +18,19 @@ from agentconductor.domain.execution import (
     TestingOutcome,
 )
 from agentconductor.domain.models import ProblemInstance
+from agentconductor.infrastructure.windows_job import (
+    BoundProcessContext,
+    build_process_limit_binder,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _CompletedWorkerProcess:
+    stdout: str
+    stderr: str
+    returncode: int | None
+    timed_out: bool
+    binding_context: BoundProcessContext
 
 
 class PythonSubprocessJudgeAdapter:
@@ -68,23 +82,16 @@ class PythonSubprocessJudgeAdapter:
                     spec.resource_limits.wall_time_seconds,
                     self._timeout_seconds,
                 )
-                try:
-                    completed = subprocess.run(
-                        [
-                            sys.executable,
-                            harness_path.name,
-                            "--case-index",
-                            str(case_index),
-                            "--result-path",
-                            result_path.name,
-                        ],
-                        cwd=sandbox_root,
-                        capture_output=True,
-                        text=True,
-                        timeout=wall_time_seconds,
-                        check=False,
-                    )
-                except subprocess.TimeoutExpired:
+                completed = _run_worker_process(
+                    sandbox_root=sandbox_root,
+                    harness_path=harness_path,
+                    case_index=case_index,
+                    result_path=result_path,
+                    wall_time_seconds=wall_time_seconds,
+                    resource_limits=spec.resource_limits,
+                )
+
+                if completed.timed_out:
                     diagnostics = (
                         f"Case '{test_case.name}' exceeded the hard wall-clock limit "
                         f"of {wall_time_seconds:.1f}s.",
@@ -107,7 +114,28 @@ class PythonSubprocessJudgeAdapter:
                 last_exit_code = completed.returncode
 
                 if not result_path.exists():
-                    if completed.returncode < 0 and spec.resource_limits.cpu_time_seconds > 0:
+                    classified_outcome, classified_diagnostics = (
+                        completed.binding_context.classify_missing_result(
+                            return_code=completed.returncode
+                        )
+                    )
+                    if classified_outcome is not None:
+                        case_results.append(
+                            JudgeCaseResult(
+                                name=test_case.name,
+                                outcome=classified_outcome,
+                                diagnostics=classified_diagnostics,
+                            )
+                        )
+                        return SandboxExecutionResult(
+                            outcome=classified_outcome,
+                            diagnostics=classified_diagnostics,
+                            case_results=tuple(case_results),
+                            stdout=completed.stdout,
+                            stderr=completed.stderr,
+                            exit_code=completed.returncode,
+                        )
+                    if completed.returncode is not None and completed.returncode < 0 and spec.resource_limits.cpu_time_seconds > 0:
                         diagnostics = (
                             f"Case '{test_case.name}' exceeded the configured CPU limit "
                             "before the judge worker could emit a result.",
@@ -129,6 +157,8 @@ class PythonSubprocessJudgeAdapter:
                         )
                     stderr = completed.stderr.strip()
                     diagnostics = ("Judge harness did not produce a structured result.",)
+                    if completed.binding_context.binding_diagnostics:
+                        diagnostics = diagnostics + completed.binding_context.binding_diagnostics
                     if stderr:
                         diagnostics = diagnostics + (stderr,)
                     return SandboxExecutionResult(
@@ -178,6 +208,74 @@ class PythonSubprocessJudgeAdapter:
 
 
 PythonSubprocessSandboxAdapter = PythonSubprocessJudgeAdapter
+
+
+def _run_worker_process(
+    *,
+    sandbox_root: Path,
+    harness_path: Path,
+    case_index: int,
+    result_path: Path,
+    wall_time_seconds: float,
+    resource_limits,
+) -> _CompletedWorkerProcess:
+    binder = build_process_limit_binder()
+    command = [
+        sys.executable,
+        harness_path.name,
+        "--case-index",
+        str(case_index),
+        "--result-path",
+        result_path.name,
+    ]
+    creationflags = 0
+    if sys.platform == "win32":
+        creationflags = getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0)
+    process = subprocess.Popen(
+        command,
+        cwd=sandbox_root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        creationflags=creationflags,
+    )
+    binding_context: BoundProcessContext | None = None
+    try:
+        binding_context = binder.bind(
+            process_pid=process.pid,
+            resource_limits=resource_limits,
+        )
+        try:
+            stdout, stderr = process.communicate(timeout=wall_time_seconds)
+            binding_context.observe_process_exit()
+            return _CompletedWorkerProcess(
+                stdout=stdout,
+                stderr=stderr,
+                returncode=process.returncode,
+                timed_out=False,
+                binding_context=binding_context,
+            )
+        except subprocess.TimeoutExpired:
+            process.kill()
+            stdout, stderr = process.communicate()
+            if binding_context is not None:
+                binding_context.observe_process_exit()
+            return _CompletedWorkerProcess(
+                stdout=stdout,
+                stderr=stderr,
+                returncode=process.returncode,
+                timed_out=True,
+                binding_context=binding_context
+                or BoundProcessContext(
+                    platform=sys.platform,
+                    hard_memory_limit=False,
+                    hard_cpu_limit=False,
+                    hard_wall_time_limit=True,
+                ),
+            )
+    finally:
+        if binding_context is not None:
+            binding_context.close()
 
 
 def _build_harness(*, spec: SandboxTestSpec) -> str:
