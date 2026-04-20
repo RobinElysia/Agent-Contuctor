@@ -1,10 +1,10 @@
-"""Typed execution contracts for topology runs and sandbox evaluation."""
+"""Typed execution contracts for topology runs and judge-backed evaluation."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Protocol
+from typing import Any, Protocol
 
 from agentconductor.domain.models import DifficultyLevel, ProblemInstance
 from agentconductor.domain.topology import AgentReference, AgentRole
@@ -40,8 +40,21 @@ TestingOutcome.__test__ = False
 
 
 @dataclass(frozen=True, slots=True)
+class JudgeCaseResult:
+    """Structured verdict for one executed judge case."""
+
+    name: str
+    outcome: TestingOutcome
+    diagnostics: tuple[str, ...] = ()
+    actual_output: Any | None = None
+    expected_output: Any | None = None
+    actual_stdout: str | None = None
+    expected_stdout: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class CodeCandidate:
-    """Extracted candidate code passed into a sandbox adapter."""
+    """Extracted candidate code passed into a judge adapter."""
 
     step_index: int
     agent_name: str
@@ -51,19 +64,41 @@ class CodeCandidate:
 
 
 @dataclass(frozen=True, slots=True)
+class JudgeTestCase:
+    """Single judge test case for one candidate invocation."""
+
+    name: str
+    arguments: tuple[Any, ...] = ()
+    keyword_arguments: tuple[tuple[str, Any], ...] = ()
+    stdin_text: str | None = None
+    expected_output: Any = None
+    expected_stdout: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class JudgeResourceLimits:
+    """Soft resource limits attached to a judge evaluation request."""
+
+    cpu_time_seconds: float = 1.0
+    memory_limit_bytes: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SandboxTestSpec:
-    """Local executable test spec for a candidate solution."""
+    """Judge-oriented executable spec for a candidate solution."""
 
     entrypoint: str
-    required_substrings: tuple[str, ...] = ()
+    test_cases: tuple[JudgeTestCase, ...] = ()
+    resource_limits: JudgeResourceLimits = field(default_factory=JudgeResourceLimits)
 
 
 @dataclass(frozen=True, slots=True)
 class SandboxExecutionResult:
-    """Structured outcome returned by a sandbox adapter."""
+    """Structured outcome returned by a sandbox or judge adapter."""
 
     outcome: TestingOutcome
     diagnostics: tuple[str, ...]
+    case_results: tuple[JudgeCaseResult, ...] = ()
     stdout: str = ""
     stderr: str = ""
     exit_code: int | None = None
@@ -78,7 +113,7 @@ class SandboxAdapter(Protocol):
         candidate: CodeCandidate,
         spec: SandboxTestSpec,
     ) -> SandboxExecutionResult:
-        """Run sandbox-backed evaluation for one code candidate."""
+        """Run judge-backed evaluation for one code candidate."""
 
 
 @dataclass(frozen=True, slots=True)

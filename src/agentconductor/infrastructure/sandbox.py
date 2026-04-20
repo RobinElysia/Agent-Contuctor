@@ -1,4 +1,4 @@
-"""Concrete local sandbox adapter implementations."""
+"""Concrete local judge adapter implementations."""
 
 from __future__ import annotations
 
@@ -10,6 +10,8 @@ from pathlib import Path
 
 from agentconductor.domain.execution import (
     CodeCandidate,
+    JudgeCaseResult,
+    JudgeTestCase,
     SandboxExecutionResult,
     SandboxTestSpec,
     TestingOutcome,
@@ -17,8 +19,8 @@ from agentconductor.domain.execution import (
 from agentconductor.domain.models import ProblemInstance
 
 
-class PythonSubprocessSandboxAdapter:
-    """Evaluate Python candidates in a short-lived local subprocess."""
+class PythonSubprocessJudgeAdapter:
+    """Evaluate Python candidates in a short-lived local subprocess judge."""
 
     def __init__(self, *, timeout_seconds: float = 1.0) -> None:
         self._timeout_seconds = timeout_seconds
@@ -36,7 +38,11 @@ class PythonSubprocessSandboxAdapter:
                 diagnostics=(f"Unsupported candidate language '{candidate.language}'.",),
             )
 
-        with tempfile.TemporaryDirectory(prefix="agentconductor-sbx-") as temp_dir:
+        timeout_seconds = max(
+            spec.resource_limits.cpu_time_seconds,
+            self._timeout_seconds,
+        )
+        with tempfile.TemporaryDirectory(prefix="agentconductor-judge-") as temp_dir:
             sandbox_root = Path(temp_dir)
             candidate_path = sandbox_root / "candidate.py"
             result_path = sandbox_root / "result.json"
@@ -54,22 +60,20 @@ class PythonSubprocessSandboxAdapter:
                     cwd=sandbox_root,
                     capture_output=True,
                     text=True,
-                    timeout=self._timeout_seconds,
+                    timeout=timeout_seconds,
                     check=False,
                 )
             except subprocess.TimeoutExpired:
                 return SandboxExecutionResult(
                     outcome=TestingOutcome.TIME_LIMIT_EXCEEDED,
                     diagnostics=(
-                        f"Sandbox execution exceeded {self._timeout_seconds:.1f}s timeout.",
+                        f"Judge execution exceeded {timeout_seconds:.1f}s timeout.",
                     ),
                 )
 
             if not result_path.exists():
                 stderr = completed.stderr.strip()
-                diagnostics = (
-                    "Sandbox harness did not produce a structured result.",
-                )
+                diagnostics = ("Judge harness did not produce a structured result.",)
                 if stderr:
                     diagnostics = diagnostics + (stderr,)
                 return SandboxExecutionResult(
@@ -84,25 +88,68 @@ class PythonSubprocessSandboxAdapter:
             return SandboxExecutionResult(
                 outcome=TestingOutcome(payload["outcome"]),
                 diagnostics=tuple(payload.get("diagnostics", ())),
+                case_results=tuple(
+                    JudgeCaseResult(
+                        name=case_payload["name"],
+                        outcome=TestingOutcome(case_payload["outcome"]),
+                        diagnostics=tuple(case_payload.get("diagnostics", ())),
+                        actual_output=case_payload.get("actual_output"),
+                        expected_output=case_payload.get("expected_output"),
+                        actual_stdout=case_payload.get("actual_stdout"),
+                        expected_stdout=case_payload.get("expected_stdout"),
+                    )
+                    for case_payload in payload.get("case_results", ())
+                ),
                 stdout=payload.get("stdout", completed.stdout),
                 stderr=payload.get("stderr", completed.stderr),
                 exit_code=completed.returncode,
             )
 
 
+PythonSubprocessSandboxAdapter = PythonSubprocessJudgeAdapter
+
+
 def _build_harness(*, spec: SandboxTestSpec, result_path: str) -> str:
-    required_substrings = ", ".join(repr(value.lower()) for value in spec.required_substrings)
-    return f"""import importlib.util
+    payload = {
+        "entrypoint": spec.entrypoint,
+        "test_cases": [_serialize_test_case(test_case) for test_case in spec.test_cases],
+        "resource_limits": {
+            "cpu_time_seconds": spec.resource_limits.cpu_time_seconds,
+            "memory_limit_bytes": spec.resource_limits.memory_limit_bytes,
+        },
+    }
+    payload_json = json.dumps(payload)
+    return f"""import contextlib
+import importlib.util
+import io
 import json
+import sys
+import tracemalloc
 from pathlib import Path
 
 RESULT_PATH = Path({result_path!r})
-ENTRYPOINT = {spec.entrypoint!r}
-REQUIRED_SUBSTRINGS = [{required_substrings}]
+SPEC = json.loads({payload_json!r})
+ENTRYPOINT = SPEC["entrypoint"]
+TEST_CASES = SPEC["test_cases"]
+RESOURCE_LIMITS = SPEC["resource_limits"]
 
 
 def write_result(payload):
     RESULT_PATH.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def normalize(value):
+    if isinstance(value, str):
+        value = value.replace("\\r\\n", "\\n").replace("\\r", "\\n")
+        lines = value.split("\\n")
+        normalized_lines = [line.rstrip(" \\t") for line in lines]
+        while normalized_lines and normalized_lines[-1] == "":
+            normalized_lines.pop()
+        return "\\n".join(normalized_lines)
+    return value
+
+
+case_results = []
 
 
 try:
@@ -114,12 +161,14 @@ except SyntaxError as exc:
     write_result({{
         "outcome": "compilation_error",
         "diagnostics": [f"Compilation failed: {{exc.msg}} at line {{exc.lineno}}."],
+        "case_results": case_results,
     }})
     raise SystemExit(0)
 except Exception as exc:
     write_result({{
         "outcome": "runtime_error",
         "diagnostics": [f"Module import failed: {{exc.__class__.__name__}}: {{exc}}."],
+        "case_results": case_results,
     }})
     raise SystemExit(0)
 
@@ -128,46 +177,165 @@ if entrypoint is None or not callable(entrypoint):
     write_result({{
         "outcome": "runtime_error",
         "diagnostics": [f"Required callable '{{ENTRYPOINT}}' was not defined."],
+        "case_results": case_results,
     }})
     raise SystemExit(0)
 
-try:
-    value = entrypoint()
-except MemoryError:
-    write_result({{
-        "outcome": "memory_limit_exceeded",
-        "diagnostics": ["Candidate raised MemoryError during execution."],
-    }})
-    raise SystemExit(0)
-except Exception as exc:
+if not TEST_CASES:
     write_result({{
         "outcome": "runtime_error",
-        "diagnostics": [f"Candidate raised {{exc.__class__.__name__}}: {{exc}}."],
+        "diagnostics": ["Judge spec must contain at least one test case."],
+        "case_results": case_results,
     }})
     raise SystemExit(0)
 
-if not isinstance(value, str):
-    write_result({{
-        "outcome": "wrong_answer",
-        "diagnostics": ["solve() must return a string for the local sandbox harness."],
-        "stdout": repr(value),
-    }})
-    raise SystemExit(0)
+for case in TEST_CASES:
+    original_stdin = sys.stdin
+    stdout_buffer = io.StringIO()
+    captured_stdout = ""
+    value = None
+    try:
+        if case.get("stdin_text") is not None:
+            sys.stdin = io.StringIO(case["stdin_text"])
+        tracemalloc.start()
+        with contextlib.redirect_stdout(stdout_buffer):
+            value = entrypoint(
+                *case.get("arguments", []),
+                **case.get("keyword_arguments", {{}}),
+            )
+        _, peak_bytes = tracemalloc.get_traced_memory()
+        captured_stdout = stdout_buffer.getvalue()
+    except MemoryError:
+        case_results.append({{
+            "name": case["name"],
+            "outcome": "memory_limit_exceeded",
+            "diagnostics": [f"Candidate exhausted memory during case '{{case['name']}}'."],
+        }})
+        write_result({{
+            "outcome": "memory_limit_exceeded",
+            "diagnostics": [f"Candidate exhausted memory during case '{{case['name']}}'."],
+            "case_results": case_results,
+        }})
+        raise SystemExit(0)
+    except Exception as exc:
+        case_results.append({{
+            "name": case["name"],
+            "outcome": "runtime_error",
+            "diagnostics": [
+                f"Candidate raised {{exc.__class__.__name__}} during case '{{case['name']}}': {{exc}}."
+            ],
+            "actual_stdout": stdout_buffer.getvalue(),
+        }})
+        write_result({{
+            "outcome": "runtime_error",
+            "diagnostics": [
+                f"Candidate raised {{exc.__class__.__name__}} during case '{{case['name']}}': {{exc}}."
+            ],
+            "case_results": case_results,
+            "stdout": stdout_buffer.getvalue(),
+        }})
+        raise SystemExit(0)
+    finally:
+        if tracemalloc.is_tracing():
+            tracemalloc.stop()
+        sys.stdin = original_stdin
 
-normalized_value = value.lower()
-missing = [token for token in REQUIRED_SUBSTRINGS if token not in normalized_value]
-if missing:
-    write_result({{
-        "outcome": "wrong_answer",
-        "diagnostics": [f"Returned value missed required token(s): {{', '.join(missing)}}."],
-        "stdout": value,
+    memory_limit = RESOURCE_LIMITS.get("memory_limit_bytes")
+    if memory_limit is not None and peak_bytes > memory_limit:
+        case_results.append({{
+            "name": case["name"],
+            "outcome": "memory_limit_exceeded",
+            "diagnostics": [
+                f"Case '{{case['name']}}' exceeded the soft memory limit: "
+                f"{{peak_bytes}} > {{memory_limit}} bytes."
+            ],
+            "actual_output": value,
+            "actual_stdout": captured_stdout,
+        }})
+        write_result({{
+            "outcome": "memory_limit_exceeded",
+            "diagnostics": [
+                f"Case '{{case['name']}}' exceeded the soft memory limit: "
+                f"{{peak_bytes}} > {{memory_limit}} bytes."
+            ],
+            "case_results": case_results,
+            "stdout": captured_stdout,
+        }})
+        raise SystemExit(0)
+
+    expected_output = case.get("expected_output")
+    if expected_output is not None and normalize(value) != normalize(expected_output):
+        case_results.append({{
+            "name": case["name"],
+            "outcome": "wrong_answer",
+            "diagnostics": [
+                f"Case '{{case['name']}}' returned {{value!r}}; expected {{expected_output!r}}."
+            ],
+            "actual_output": value,
+            "expected_output": expected_output,
+            "actual_stdout": captured_stdout,
+            "expected_stdout": case.get("expected_stdout"),
+        }})
+        write_result({{
+            "outcome": "wrong_answer",
+            "diagnostics": [
+                f"Case '{{case['name']}}' returned {{value!r}}; expected {{expected_output!r}}."
+            ],
+            "case_results": case_results,
+            "stdout": captured_stdout,
+        }})
+        raise SystemExit(0)
+
+    expected_stdout = case.get("expected_stdout")
+    if expected_stdout is not None and normalize(captured_stdout) != normalize(expected_stdout):
+        case_results.append({{
+            "name": case["name"],
+            "outcome": "wrong_answer",
+            "diagnostics": [
+                f"Case '{{case['name']}}' printed {{captured_stdout.strip()!r}}; "
+                f"expected {{expected_stdout!r}}."
+            ],
+            "actual_output": value,
+            "expected_output": expected_output,
+            "actual_stdout": captured_stdout,
+            "expected_stdout": expected_stdout,
+        }})
+        write_result({{
+            "outcome": "wrong_answer",
+            "diagnostics": [
+                f"Case '{{case['name']}}' printed {{captured_stdout.strip()!r}}; "
+                f"expected {{expected_stdout!r}}."
+            ],
+            "case_results": case_results,
+            "stdout": captured_stdout,
+        }})
+        raise SystemExit(0)
+
+    case_results.append({{
+        "name": case["name"],
+        "outcome": "passed",
+        "actual_output": value,
+        "expected_output": expected_output,
+        "actual_stdout": captured_stdout,
+        "expected_stdout": expected_stdout,
     }})
-    raise SystemExit(0)
 
 write_result({{
     "outcome": "passed",
-    "diagnostics": ["Local sandbox accepted the candidate code."],
-    "stdout": value,
+    "diagnostics": [f"Judge accepted the candidate across {{len(TEST_CASES)}} case(s)."],
+    "case_results": case_results,
+    "stdout": "",
 }})
 raise SystemExit(0)
 """
+
+
+def _serialize_test_case(test_case: JudgeTestCase) -> dict[str, object]:
+    return {
+        "name": test_case.name,
+        "arguments": list(test_case.arguments),
+        "keyword_arguments": dict(test_case.keyword_arguments),
+        "stdin_text": test_case.stdin_text,
+        "expected_output": test_case.expected_output,
+        "expected_stdout": test_case.expected_stdout,
+    }

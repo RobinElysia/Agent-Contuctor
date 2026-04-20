@@ -7,12 +7,12 @@ The API is still in an early milestone. It currently provides:
 - a typed solve entrypoint with deterministic planning and bounded multi-turn execution
 - a typed multi-turn solve-state contract that records per-turn history
 - a deterministic topology-planning entrypoint
-- a single-turn topology-execution entrypoint backed by a local sandbox adapter
+- a single-turn topology-execution entrypoint backed by a local subprocess judge adapter
 - typed topology schema objects for single-turn plans
 - validation rules for topology structure before execution
 
 The repository now supports a local bounded multi-turn solve loop, but it still
-does not implement the paper's full sandbox-backed inference runtime.
+does not implement the paper's full benchmark-grade inference runtime.
 
 ## Public Entry Points
 
@@ -39,8 +39,12 @@ Other public types:
 - `agentconductor.ExecutionStatus`
 - `agentconductor.TestingOutcome`
 - `agentconductor.CodeCandidate`
+- `agentconductor.JudgeTestCase`
+- `agentconductor.JudgeCaseResult`
+- `agentconductor.JudgeResourceLimits`
 - `agentconductor.SandboxTestSpec`
 - `agentconductor.SandboxExecutionResult`
+- `agentconductor.PythonSubprocessJudgeAdapter`
 - `agentconductor.PythonSubprocessSandboxAdapter`
 - `agentconductor.TopologyExecutionError`
 - `agentconductor.SolveState`
@@ -202,15 +206,44 @@ Behavior:
 - resolves references only from prior executed steps
 - dispatches each agent through a deterministic role registry
 - extracts the last referenced candidate code through an explicit code-candidate contract
-- evaluates candidate code through a concrete sandbox adapter
-- returns structured per-agent outputs, final candidate code, sandbox diagnostics, and final testing outcome
+- evaluates candidate code through a concrete judge adapter
+- returns structured per-agent outputs, final candidate code, judge diagnostics, and final testing outcome
 
 Implementation inference:
 
 - the current role registry uses deterministic non-testing worker handlers, while
-  the testing role delegates to a repository-local Python subprocess sandbox
-- the local sandbox harness validates a Python `solve()` entrypoint and checks
-  simple prompt-derived expectations until a fuller benchmark judge exists
+  the testing role delegates to a repository-local Python subprocess judge
+- the local judge validates a Python `solve()` entrypoint against explicit test
+  cases, expected outputs, and soft resource limits until a fuller benchmark
+  integration exists
+
+### Judge Contract
+
+The current judge-facing types are:
+
+- `JudgeTestCase`
+  Carries one named invocation, optional positional or keyword arguments, optional stdin text, and expected output or stdout.
+- `JudgeCaseResult`
+  Carries the typed verdict for one executed case, including pass/fail outcome, diagnostics, and captured actual versus expected outputs.
+- `JudgeResourceLimits`
+  Carries soft per-evaluation limits such as CPU time and memory budget.
+- `SandboxTestSpec`
+  Bundles the target entrypoint, concrete test cases, and resource limits into the adapter request.
+
+Current benchmark-aligned semantics:
+
+- the judge now returns structured per-case verdicts instead of only a single aggregate outcome
+- string comparison normalizes line endings and ignores trailing whitespace at line boundaries, which is closer to common benchmark judge behavior than the earlier full `strip()` comparison
+- aggregate outcomes still map into the repository's typed `TestingOutcome` contract
+
+Current fidelity limits:
+
+- the repository judge is still local and Python-only
+- entrypoint and invocation semantics are still repository-defined rather than imported from a real benchmark harness
+- timeout handling is enforced by the subprocess boundary
+- memory limits are a soft approximation based on traced Python allocations, not a full OS-level sandbox quota
+- output normalization is still a repository-level inference rather than a benchmark-specific ruleset
+- exact benchmark-specific semantics, datasets, and multi-language support are still out of scope for this milestone
 
 ## Topology Planning API
 
@@ -378,7 +411,7 @@ It currently does:
 - validate paper-aligned topology structure
 - emit deterministic topology plans for supported difficulty tiers
 - emit deterministic revised topologies from prior-turn feedback
-- execute single-turn topologies with a local sandbox-backed testing role
+- execute single-turn topologies with a local judge-backed testing role
 - run a bounded multi-turn solve loop with early stop on pass
 - return candidate code and structured execution traces from `solve_problem(...)`
 

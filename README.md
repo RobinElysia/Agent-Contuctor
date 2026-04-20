@@ -9,10 +9,10 @@ The repository currently provides:
 - a stable Python solve API for deterministic planning plus bounded multi-turn execution
 - a typed multi-turn solve-state contract for turn history and later revision
 - a deterministic topology planner that emits validated single-turn plans
-- a single-turn graph executor whose testing role runs through a local sandbox adapter
+- a single-turn graph executor whose testing role runs through a local subprocess judge adapter
 - focused tests for the bootstrap and API layers
 
-The repository does not yet implement the full paper runtime. The current API can run up to the configured turn budget with deterministic topology revision and local sandbox-backed evaluation, but it still does not provide a benchmark-grade external judge.
+The repository does not yet implement the full paper runtime. The current API can run up to the configured turn budget with deterministic topology revision and local judge-backed evaluation, but the judge remains a repository-local approximation rather than an exact benchmark integration.
 
 ## Current Status
 
@@ -25,6 +25,8 @@ Completed milestones:
 - `TOP-01`: single-turn topology schema and validation
 - `ORCH-01`: deterministic rule-based topology planning
 - `EXEC-01`: deterministic single-turn topology execution
+- `JUDGE-01`: richer subprocess judge boundary with explicit test cases and soft resource limits
+- `JUDGE-02`: stricter judge normalization and typed per-case verdict reporting
 
 Not yet implemented:
 
@@ -150,7 +152,7 @@ The execution API can return a typed `TopologyExecutionResult` with:
 - per-step and per-agent structured outputs
 - resolved upstream references for each agent
 - final candidate code
-- local sandbox outcome and diagnostics
+- judge outcome and diagnostics
 
 See [API.md](/D:/code/PaperCreate/AgentConductor/API.md) for the full interface contract.
 
@@ -159,7 +161,7 @@ See [API.md](/D:/code/PaperCreate/AgentConductor/API.md) for the full interface 
 Run the focused test suite:
 
 ```powershell
-uv run pytest tests/test_bootstrap.py tests/test_api.py tests/test_topology.py tests/test_orchestrator.py tests/test_execution.py
+uv run pytest
 ```
 
 ## Design Notes
@@ -167,9 +169,12 @@ uv run pytest tests/test_bootstrap.py tests/test_api.py tests/test_topology.py t
 - The package keeps paper-method logic, application orchestration, and interfaces separated.
 - The first API is intentionally narrow. It is a stable Python boundary, not an HTTP service.
 - The executor remains deterministic for planning and worker-role behavior, but
-  its testing role now evaluates candidate code through a local sandbox adapter.
-- The sandbox adapter is concrete but still minimal. It runs Python candidates in
-  a short-lived subprocess with a small local harness, not a full benchmark judge.
+  its testing role now evaluates candidate code through a local subprocess judge adapter.
+- The subprocess judge is concrete but still approximate. It runs Python candidates
+  against explicit test cases, expected outputs, typed per-case verdicts, and soft
+  resource limits. It now normalizes line endings and trailing line whitespace in
+  a more judge-like way, but it still does not reproduce an external benchmark's
+  exact runtime semantics.
 - When behavior is inferred rather than stated by the paper, the repository documents that explicitly.
 
 ## Next Likely Steps

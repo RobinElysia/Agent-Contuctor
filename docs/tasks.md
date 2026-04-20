@@ -291,7 +291,7 @@ Out of scope:
 - benchmark-scale evaluation pipelines
 
 ### Task ID: JUDGE-01
-Status: todo
+Status: done
 Depends on: SBX-01
 Scope: replace the repository-local Python sandbox harness with a benchmark-grade judge boundary
 Files:
@@ -316,6 +316,85 @@ Out of scope:
 - distributed scheduling across multiple sandbox workers
 - benchmark-scale batch orchestration
 - training or RL policy updates
+
+### Task ID: JUDGE-02
+Status: done
+Depends on: JUDGE-01
+Scope: close the fidelity gap between the repository-local judge and the target benchmark judge semantics
+Files:
+- `src/agentconductor/infrastructure/`
+- `src/agentconductor/application/`
+- `src/agentconductor/domain/`
+- `tests/`
+- `docs/tech.md`
+- `docs/Paper.md`
+- `API.md`
+- `README.md`
+Implementation notes:
+- identify which benchmark judge behaviors are still approximated locally and document them explicitly
+- add adapter contracts for benchmark-facing execution semantics without leaking judge-specific details into application services
+- support benchmark-relevant behaviors that are currently missing, such as stricter entrypoint expectations, result normalization rules, or richer per-case verdict mapping
+- label every remaining repository-level inference so downstream evaluation tasks know the current fidelity boundary
+Acceptance criteria:
+- the repository documents a concrete gap list between the local judge and the target benchmark semantics
+- at least one currently approximated judge behavior is upgraded to a stricter benchmark-aligned implementation
+- tests cover the upgraded semantics and verify typed outcome mapping remains stable
+- caller-facing docs explain what is now benchmark-aligned and what still remains approximate
+Out of scope:
+- distributed worker orchestration
+- benchmark-scale batch scheduling
+- RL or SFT training changes
+
+### Task ID: SBX-02
+Status: todo
+Depends on: JUDGE-01
+Scope: replace soft in-process resource checks with stronger sandbox-enforced execution limits
+Files:
+- `src/agentconductor/infrastructure/`
+- `src/agentconductor/domain/`
+- `tests/`
+- `docs/tech.md`
+- `API.md`
+- `README.md`
+Implementation notes:
+- move resource enforcement toward subprocess- or OS-level controls instead of relying only on Python-level approximation
+- keep the sandbox adapter boundary narrow so application services continue to consume typed execution results only
+- make CPU, wall-clock, and memory limits explicit and separately configurable where the runtime supports them
+- document platform-specific behavior and any fallback path used when hard limits are unavailable
+Acceptance criteria:
+- the judge path enforces at least one resource limit through a stronger mechanism than `tracemalloc`
+- typed outcomes distinguish hard limit violations from generic runtime failures
+- tests cover at least one limit-exceeded path under the stronger enforcement strategy
+- docs describe enforcement guarantees and known platform gaps
+Out of scope:
+- distributed orchestration
+- external benchmark dataset pipelines
+- training changes
+
+### Task ID: DEVX-01
+Status: todo
+Depends on: JUDGE-01
+Scope: make repository verification commands reproducible under restricted local environments
+Files:
+- `pyproject.toml`
+- `README.md`
+- `docs/tech.md`
+- `tests/` if helper coverage is added
+- repository-level helper scripts if introduced
+Implementation notes:
+- keep `uv` as the package and environment manager, but remove assumptions that verification always has access to a user-global cache path
+- provide a repository-local or explicitly configurable verification path for test execution in sandboxed environments
+- document the supported verification commands and any required environment variables
+- avoid introducing heavyweight tooling solely for test invocation
+Acceptance criteria:
+- the repository documents and supports at least one `uv`-based test command that works with restricted cache permissions
+- verification instructions no longer rely on undeclared machine-specific state
+- if helper configuration is added, tests or smoke verification cover the supported invocation path
+- docs clearly distinguish preferred verification commands from fallback commands
+Out of scope:
+- CI service deployment
+- external package mirror management
+- non-Python toolchain setup
 
 ### Task ID: DIST-01
 Status: todo

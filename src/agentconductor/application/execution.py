@@ -8,6 +8,8 @@ from agentconductor.domain.execution import (
     AgentExecutionResult,
     CodeCandidate,
     ExecutionStatus,
+    JudgeResourceLimits,
+    JudgeTestCase,
     ResolvedAgentOutput,
     SandboxAdapter,
     SandboxExecutionResult,
@@ -19,7 +21,7 @@ from agentconductor.domain.execution import (
 )
 from agentconductor.domain.models import ProblemInstance
 from agentconductor.domain.topology import AgentInvocation, AgentReference, AgentRole, TopologyPlan
-from agentconductor.infrastructure.sandbox import PythonSubprocessSandboxAdapter
+from agentconductor.infrastructure.sandbox import PythonSubprocessJudgeAdapter
 
 RoleHandler = Callable[
     [ProblemInstance, AgentInvocation, int, tuple[ResolvedAgentOutput, ...]],
@@ -88,7 +90,7 @@ def build_default_role_registry(
     sandbox: SandboxAdapter | None = None,
 ) -> dict[AgentRole, RoleHandler]:
     """Return the deterministic role registry used by the executor."""
-    active_sandbox = sandbox or PythonSubprocessSandboxAdapter()
+    active_sandbox = sandbox or PythonSubprocessJudgeAdapter()
     return {
         AgentRole.RETRIEVAL: _run_retrieval_role,
         AgentRole.PLANNING: _run_planning_role,
@@ -219,7 +221,7 @@ def _run_coding_role(
     candidate_code = (
         f"def solve() -> str:\n"
         f"    \"\"\"Deterministic candidate for {problem.identifier}.\"\"\"\n"
-        f"    return \"{focus} solved using {ref_summary}\"\n"
+        f"    return \"{focus} solved\"\n"
     )
     return AgentExecutionResult(
         step_index=step_index,
@@ -284,7 +286,7 @@ def _run_testing_role(
         sandbox_result = sandbox.evaluate(
             problem,
             extracted_candidate,
-            build_sandbox_test_spec(problem),
+            build_judge_test_spec(problem),
         )
         outcome = sandbox_result.outcome
         diagnostics = sandbox_result.diagnostics
@@ -312,11 +314,18 @@ def _extract_focus(prompt: str) -> str:
     return meaningful_tokens[0] if meaningful_tokens else "problem"
 
 
-def build_sandbox_test_spec(problem: ProblemInstance) -> SandboxTestSpec:
-    """Return a narrow local test spec derived from the current problem."""
+def build_judge_test_spec(problem: ProblemInstance) -> SandboxTestSpec:
+    """Return a repository-local judge spec derived from the current problem."""
+    expected_output = f"{_extract_focus(problem.prompt)} solved"
     return SandboxTestSpec(
         entrypoint="solve",
-        required_substrings=(_extract_focus(problem.prompt),),
+        test_cases=(
+            JudgeTestCase(
+                name="prompt-derived-smoke",
+                expected_output=expected_output,
+            ),
+        ),
+        resource_limits=JudgeResourceLimits(cpu_time_seconds=1.0),
     )
 
 

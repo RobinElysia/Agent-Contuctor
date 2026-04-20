@@ -57,8 +57,10 @@ def test_execute_topology_plan_preserves_testing_diagnostics() -> None:
     assert testing_result.candidate_code == result.final_candidate_code
     assert testing_result.sandbox_result is not None
     assert result.diagnostics == (
-        "Local sandbox accepted the candidate code.",
+        "Judge accepted the candidate across 1 case(s).",
     )
+    assert len(testing_result.sandbox_result.case_results) == 1
+    assert testing_result.sandbox_result.case_results[0].outcome is TestingOutcome.PASSED
 
 
 def test_execute_topology_plan_rejects_invalid_references() -> None:

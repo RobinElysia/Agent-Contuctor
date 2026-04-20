@@ -5,6 +5,9 @@ from agentconductor.domain.execution import (
     AgentExecutionResult,
     CodeCandidate,
     ExecutionStatus,
+    JudgeCaseResult,
+    JudgeResourceLimits,
+    JudgeTestCase,
     ResolvedAgentOutput,
     SandboxAdapter,
     SandboxExecutionResult,
@@ -38,7 +41,10 @@ from agentconductor.domain.topology import (
     TopologyStep,
     TopologyValidationError,
 )
-from agentconductor.infrastructure.sandbox import PythonSubprocessSandboxAdapter
+from agentconductor.infrastructure.sandbox import (
+    PythonSubprocessJudgeAdapter,
+    PythonSubprocessSandboxAdapter,
+)
 from agentconductor.interfaces.api import plan_problem_topology, solve_problem
 from agentconductor.interfaces.execution import execute_topology_plan
 
@@ -50,8 +56,12 @@ __all__ = [
     "CodeCandidate",
     "DifficultyLevel",
     "ExecutionStatus",
+    "JudgeCaseResult",
+    "JudgeResourceLimits",
+    "JudgeTestCase",
     "ProblemInstance",
     "ProjectOverview",
+    "PythonSubprocessJudgeAdapter",
     "PythonSubprocessSandboxAdapter",
     "ResolvedAgentOutput",
     "SandboxAdapter",
