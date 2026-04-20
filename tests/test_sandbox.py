@@ -97,3 +97,38 @@ def test_python_subprocess_judge_adapter_normalizes_line_endings_and_trailing_sp
     assert len(result.case_results) == 1
     assert result.case_results[0].outcome is TestingOutcome.PASSED
     assert result.case_results[0].actual_stdout == "alpha  \r\n beta\t\n"
+
+
+def test_python_subprocess_judge_adapter_enforces_hard_wall_clock_limit() -> None:
+    adapter = PythonSubprocessJudgeAdapter(timeout_seconds=0.05)
+    result = adapter.evaluate(
+        ProblemInstance(identifier="demo-timeout", prompt="Loop forever."),
+        CodeCandidate(
+            step_index=1,
+            agent_name="coder_1",
+            role=AgentRole.CODING,
+            source_code=(
+                "def solve():\n"
+                "    while True:\n"
+                "        pass\n"
+            ),
+        ),
+        SandboxTestSpec(
+            entrypoint="solve",
+            test_cases=(
+                JudgeTestCase(name="infinite-loop"),
+            ),
+            resource_limits=JudgeResourceLimits(
+                cpu_time_seconds=1.0,
+                wall_time_seconds=0.05,
+            ),
+        ),
+    )
+
+    assert result.outcome is TestingOutcome.TIME_LIMIT_EXCEEDED
+    assert result.diagnostics == (
+        "Case 'infinite-loop' exceeded the hard wall-clock limit of 0.1s.",
+    )
+    assert len(result.case_results) == 1
+    assert result.case_results[0].name == "infinite-loop"
+    assert result.case_results[0].outcome is TestingOutcome.TIME_LIMIT_EXCEEDED

@@ -77,9 +77,15 @@ class JudgeTestCase:
 
 @dataclass(frozen=True, slots=True)
 class JudgeResourceLimits:
-    """Soft resource limits attached to a judge evaluation request."""
+    """Resource limits attached to a judge evaluation request.
+
+    `wall_time_seconds` is enforced through the subprocess boundary. CPU and
+    memory limits may be enforced through stronger OS primitives on supported
+    runtimes and otherwise fall back to repository-local approximations.
+    """
 
     cpu_time_seconds: float = 1.0
+    wall_time_seconds: float = 1.0
     memory_limit_bytes: int | None = None
 
 

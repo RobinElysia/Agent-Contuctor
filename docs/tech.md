@@ -69,6 +69,9 @@ The exact folder names may evolve, but the separation of responsibilities must r
 - When the repository approximates benchmark semantics, tests and docs should
   state the exact approximation boundary, such as output normalization rules or
   whether per-case verdicts are preserved.
+- When sandbox resource limits are platform-dependent, docs must distinguish
+  hard subprocess or OS-enforced guarantees from repository-local fallback
+  approximations such as traced-memory checks.
 
 ## Verification Rules
 

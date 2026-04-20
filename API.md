@@ -214,7 +214,7 @@ Implementation inference:
 - the current role registry uses deterministic non-testing worker handlers, while
   the testing role delegates to a repository-local Python subprocess judge
 - the local judge validates a Python `solve()` entrypoint against explicit test
-  cases, expected outputs, and soft resource limits until a fuller benchmark
+  cases, expected outputs, and explicit resource limits until a fuller benchmark
   integration exists
 
 ### Judge Contract
@@ -226,7 +226,7 @@ The current judge-facing types are:
 - `JudgeCaseResult`
   Carries the typed verdict for one executed case, including pass/fail outcome, diagnostics, and captured actual versus expected outputs.
 - `JudgeResourceLimits`
-  Carries soft per-evaluation limits such as CPU time and memory budget.
+  Carries per-evaluation CPU, wall-clock, and memory limits.
 - `SandboxTestSpec`
   Bundles the target entrypoint, concrete test cases, and resource limits into the adapter request.
 
@@ -235,13 +235,15 @@ Current benchmark-aligned semantics:
 - the judge now returns structured per-case verdicts instead of only a single aggregate outcome
 - string comparison normalizes line endings and ignores trailing whitespace at line boundaries, which is closer to common benchmark judge behavior than the earlier full `strip()` comparison
 - aggregate outcomes still map into the repository's typed `TestingOutcome` contract
+- wall-clock limits are enforced per case at the subprocess boundary instead of only within one long-lived in-process harness
 
 Current fidelity limits:
 
 - the repository judge is still local and Python-only
 - entrypoint and invocation semantics are still repository-defined rather than imported from a real benchmark harness
-- timeout handling is enforced by the subprocess boundary
-- memory limits are a soft approximation based on traced Python allocations, not a full OS-level sandbox quota
+- wall-clock handling is enforced by the subprocess boundary
+- CPU and memory limits use OS-level `resource` controls only on supported platforms
+- on runtimes without those controls, memory limits fall back to traced Python allocations and remain approximate
 - output normalization is still a repository-level inference rather than a benchmark-specific ruleset
 - exact benchmark-specific semantics, datasets, and multi-language support are still out of scope for this milestone
 

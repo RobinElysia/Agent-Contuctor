@@ -346,7 +346,7 @@ Out of scope:
 - RL or SFT training changes
 
 ### Task ID: SBX-02
-Status: todo
+Status: done
 Depends on: JUDGE-01
 Scope: replace soft in-process resource checks with stronger sandbox-enforced execution limits
 Files:
@@ -370,6 +370,53 @@ Out of scope:
 - distributed orchestration
 - external benchmark dataset pipelines
 - training changes
+
+### Task ID: SBX-03
+Status: todo
+Depends on: SBX-02
+Scope: add Windows Job Object-backed resource enforcement for sandbox judge workers
+Files:
+- `src/agentconductor/infrastructure/`
+- `src/agentconductor/domain/`
+- `tests/`
+- `docs/tech.md`
+- `API.md`
+- `README.md`
+Implementation notes:
+- implement a Windows-specific sandbox enforcement path using Job Objects so judge worker processes run inside an OS-managed resource container
+- keep the existing sandbox adapter boundary narrow and preserve the current typed `TestingOutcome` mapping for limit violations
+- prefer standard-library integration such as `ctypes` unless a Windows dependency is justified by a concrete maintenance or correctness benefit
+- document exactly which limits are hard-enforced on Windows through Job Objects and how that differs from the current POSIX `resource` path
+- break the implementation into these substeps:
+  1. introduce a Windows-only infrastructure helper responsible for Job Object lifecycle, limit configuration, process assignment, and teardown
+  2. add a narrow internal adapter seam in the judge runner so per-case subprocess launch can delegate platform-specific resource binding without changing application-layer contracts
+  3. map the current `JudgeResourceLimits` contract onto Windows primitives, with explicit documentation of which fields are hard-enforced and which remain approximations
+  4. detect and classify worker termination paths where the operating system kills the process before the harness emits a structured result
+  5. add platform-gated tests for Windows behavior and keep non-Windows tests stable
+- use an internal interface sketch close to:
+  - `class ProcessLimitBinder(Protocol): bind(process_handle, resource_limits) -> BoundProcessContext`
+  - `class WindowsJobObjectBinder: create_job(); configure_limits(resource_limits); assign_process(process_handle); close()`
+  - `@dataclass(frozen=True) class BoundProcessContext: platform: str; hard_memory_limit: bool; hard_cpu_limit: bool; hard_wall_time_limit: bool`
+  - the judge adapter should keep returning `SandboxExecutionResult` only; Job Object details stay inside infrastructure
+- map resource limits on Windows with these expectations:
+  - `memory_limit_bytes`: primary target for hard Job Object enforcement
+  - `wall_time_seconds`: remains enforced by the existing per-case subprocess timeout owned by the parent judge process
+  - `cpu_time_seconds`: treat as provisional on Windows until the repository chooses a stable Job Object CPU accounting strategy; do not claim parity with POSIX `RLIMIT_CPU` without verification
+- use a result-mapping plan close to:
+  - if the harness writes a structured result first, keep trusting the emitted typed outcome
+  - if the worker exits without a result file and Windows termination evidence indicates a Job Object memory kill, map to `TestingOutcome.MEMORY_LIMIT_EXCEEDED`
+  - if the worker exits without a result file and the parent timeout expires, map to `TestingOutcome.TIME_LIMIT_EXCEEDED`
+  - if the worker exits without a result file and the termination cause cannot be classified, keep mapping to `TestingOutcome.RUNTIME_ERROR` with platform-specific diagnostics
+- the implementation should make the Windows classification evidence explicit, for example by checking exit codes, Job Object completion state, or a narrow side-channel owned by the launcher rather than inferring from generic stderr text only
+Acceptance criteria:
+- on Windows, the judge can place worker processes into a Job Object with at least one hard OS-enforced resource limit
+- limit-triggered worker termination is mapped back into typed sandbox outcomes instead of surfacing only as a generic runtime failure
+- tests cover at least one Windows-specific limit-exceeded path or, if direct runtime coverage is not portable, isolate and verify the Windows adapter logic behind a platform-gated test seam
+- caller-facing docs describe the Windows enforcement guarantees, configuration limits, and remaining gaps
+Out of scope:
+- distributed worker orchestration
+- non-Windows sandbox redesign
+- benchmark dataset integration
 
 ### Task ID: DEVX-01
 Status: todo

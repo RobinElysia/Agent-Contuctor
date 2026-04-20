@@ -27,6 +27,7 @@ Completed milestones:
 - `EXEC-01`: deterministic single-turn topology execution
 - `JUDGE-01`: richer subprocess judge boundary with explicit test cases and soft resource limits
 - `JUDGE-02`: stricter judge normalization and typed per-case verdict reporting
+- `SBX-02`: stronger per-case subprocess enforcement for wall-clock limits, with platform-aware CPU and memory controls
 
 Not yet implemented:
 
@@ -171,10 +172,16 @@ uv run pytest
 - The executor remains deterministic for planning and worker-role behavior, but
   its testing role now evaluates candidate code through a local subprocess judge adapter.
 - The subprocess judge is concrete but still approximate. It runs Python candidates
-  against explicit test cases, expected outputs, typed per-case verdicts, and soft
-  resource limits. It now normalizes line endings and trailing line whitespace in
-  a more judge-like way, but it still does not reproduce an external benchmark's
-  exact runtime semantics.
+  against explicit test cases, expected outputs, typed per-case verdicts, and
+  explicit CPU, wall-clock, and memory limits.
+- Wall-clock limits are now enforced as hard per-case subprocess timeouts.
+- On platforms that expose `resource` limits, the judge also applies OS-level
+  CPU and address-space limits inside the worker process.
+- On platforms without those primitives, memory enforcement falls back to traced
+  Python allocations and remains approximate.
+- The judge still normalizes line endings and trailing line whitespace in a more
+  benchmark-like way, but it does not yet reproduce an external benchmark's
+  full runtime semantics.
 - When behavior is inferred rather than stated by the paper, the repository documents that explicitly.
 
 ## Next Likely Steps
