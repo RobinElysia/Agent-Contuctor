@@ -75,6 +75,10 @@ The exact folder names may evolve, but the separation of responsibilities must r
 - Windows-specific sandbox paths should keep Job Object details inside
   infrastructure helpers and document when host-level job constraints force an
   explicit downgrade back to wall-clock-only hard enforcement.
+- Windows CPU-limit semantics must remain explicitly separated from wall-clock
+  enforcement. Until a stable Job Object CPU strategy is verified, the runtime
+  should report CPU enforcement as unsupported or provisional rather than
+  implying POSIX-equivalent hard limits.
 
 ## Verification Rules
 
@@ -85,6 +89,24 @@ For code changes, agents should run the smallest relevant verification set first
 - basic import or entrypoint verification for new package boundaries
 
 If verification cannot be run, the agent must say so explicitly and explain why.
+
+Repository verification commands should remain reproducible under restricted
+local environments:
+
+- prefer `powershell -ExecutionPolicy Bypass -File .\scripts\run-tests.ps1` as the
+  repository-level test command on Windows because it defaults `UV_CACHE_DIR`
+  to the repository-local `.uv-cache` directory
+- keep `uv run pytest` documented as the simpler path when cache permissions are
+  already available
+- when wrappers are not available, document the explicit environment variables
+  needed to keep `uv` away from undeclared user-global cache paths
+
+For batch or distributed evaluation work:
+
+- keep job submission, worker execution, and result collection as explicit
+  orchestration concerns rather than embedding them inside judge adapters
+- preserve a single-worker path for local fallback and focused verification
+- make worker count, retry count, and collection timeout explicit and inspectable
 
 ## Documentation Drift Control
 

@@ -39,6 +39,24 @@ class TestingOutcome(StrEnum):
 TestingOutcome.__test__ = False
 
 
+class SandboxCapabilityState(StrEnum):
+    """Support level for one sandbox enforcement dimension."""
+
+    HARD_ENFORCED = "hard_enforced"
+    APPROXIMATE = "approximate"
+    UNSUPPORTED = "unsupported"
+    NOT_REQUESTED = "not_requested"
+
+
+class SandboxBindingState(StrEnum):
+    """Attachment state for platform-specific worker binding."""
+
+    ATTACHED = "attached"
+    DOWNGRADED = "downgraded"
+    SKIPPED = "skipped"
+    NOT_APPLICABLE = "not_applicable"
+
+
 @dataclass(frozen=True, slots=True)
 class JudgeCaseResult:
     """Structured verdict for one executed judge case."""
@@ -106,6 +124,19 @@ class SandboxTestSpec:
 
 
 @dataclass(frozen=True, slots=True)
+class SandboxRuntimeCapabilities:
+    """Inspectable support summary for the active judge worker runtime."""
+
+    platform: str
+    launcher_strategy: str
+    wall_time_limit: SandboxCapabilityState
+    cpu_limit: SandboxCapabilityState
+    memory_limit: SandboxCapabilityState
+    memory_binding: SandboxBindingState = SandboxBindingState.NOT_APPLICABLE
+    diagnostics: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class SandboxExecutionResult:
     """Structured outcome returned by a sandbox or judge adapter."""
 
@@ -115,6 +146,7 @@ class SandboxExecutionResult:
     stdout: str = ""
     stderr: str = ""
     exit_code: int | None = None
+    runtime_capabilities: SandboxRuntimeCapabilities | None = None
 
 
 class SandboxAdapter(Protocol):

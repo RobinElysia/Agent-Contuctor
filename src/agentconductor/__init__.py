@@ -1,6 +1,37 @@
 """AgentConductor package bootstrap and public API."""
 
 from agentconductor.application.bootstrap import bootstrap_overview
+from agentconductor.application.distributed import evaluate_candidates_distributed
+from agentconductor.application.evaluation import (
+    run_batch_evaluation,
+    run_batch_evaluation_entrypoint,
+)
+from agentconductor.application.rl import (
+    compute_reward_breakdown,
+    compute_reward_breakdown_entrypoint,
+    run_rl_baseline,
+    run_rl_baseline_entrypoint,
+)
+from agentconductor.application.training import (
+    generate_sft_dataset,
+    generate_sft_dataset_entrypoint,
+    run_sft_baseline,
+    run_sft_baseline_entrypoint,
+)
+from agentconductor.domain.distributed import (
+    DistributedEvaluationBatch,
+    DistributedEvaluationConfig,
+    DistributedEvaluationResult,
+    DistributedEvaluationStatus,
+    DistributedEvaluationTask,
+)
+from agentconductor.domain.evaluation import (
+    EvaluationProblemDefinition,
+    EvaluationProblemResult,
+    EvaluationRunArtifact,
+    EvaluationSummary,
+)
+from agentconductor.domain.rl import RewardBreakdown, RlTrainingArtifact, RlTrainingConfig
 from agentconductor.domain.execution import (
     AgentExecutionResult,
     CodeCandidate,
@@ -10,7 +41,10 @@ from agentconductor.domain.execution import (
     JudgeTestCase,
     ResolvedAgentOutput,
     SandboxAdapter,
+    SandboxBindingState,
+    SandboxCapabilityState,
     SandboxExecutionResult,
+    SandboxRuntimeCapabilities,
     SandboxTestSpec,
     StepExecutionResult,
     TestingOutcome,
@@ -41,11 +75,17 @@ from agentconductor.domain.topology import (
     TopologyStep,
     TopologyValidationError,
 )
+from agentconductor.domain.training import (
+    SftTrainingArtifact,
+    SftTrainingConfig,
+    SyntheticTopologySample,
+)
 from agentconductor.infrastructure.sandbox import (
     PythonSubprocessJudgeAdapter,
     PythonSubprocessSandboxAdapter,
 )
 from agentconductor.interfaces.api import plan_problem_topology, solve_problem
+from agentconductor.interfaces.distributed import evaluate_candidate_batch
 from agentconductor.interfaces.execution import execute_topology_plan
 
 __all__ = [
@@ -55,6 +95,15 @@ __all__ = [
     "AgentRole",
     "CodeCandidate",
     "DifficultyLevel",
+    "DistributedEvaluationBatch",
+    "DistributedEvaluationConfig",
+    "DistributedEvaluationResult",
+    "DistributedEvaluationStatus",
+    "DistributedEvaluationTask",
+    "EvaluationProblemDefinition",
+    "EvaluationProblemResult",
+    "EvaluationRunArtifact",
+    "EvaluationSummary",
     "ExecutionStatus",
     "JudgeCaseResult",
     "JudgeResourceLimits",
@@ -63,9 +112,15 @@ __all__ = [
     "ProjectOverview",
     "PythonSubprocessJudgeAdapter",
     "PythonSubprocessSandboxAdapter",
+    "RewardBreakdown",
     "ResolvedAgentOutput",
+    "RlTrainingArtifact",
+    "RlTrainingConfig",
     "SandboxAdapter",
+    "SandboxBindingState",
+    "SandboxCapabilityState",
     "SandboxExecutionResult",
+    "SandboxRuntimeCapabilities",
     "SandboxTestSpec",
     "SolveState",
     "SolveStateTransitionError",
@@ -75,6 +130,8 @@ __all__ = [
     "SolveTurnRecord",
     "StepExecutionResult",
     "StopReason",
+    "SftTrainingArtifact",
+    "SftTrainingConfig",
     "TestingOutcome",
     "TestingFeedback",
     "TopologyPlan",
@@ -83,8 +140,21 @@ __all__ = [
     "TopologyRevisionInput",
     "TopologyStep",
     "TopologyValidationError",
+    "SyntheticTopologySample",
     "bootstrap_overview",
+    "compute_reward_breakdown",
+    "compute_reward_breakdown_entrypoint",
+    "evaluate_candidate_batch",
+    "evaluate_candidates_distributed",
     "execute_topology_plan",
+    "generate_sft_dataset",
+    "generate_sft_dataset_entrypoint",
     "plan_problem_topology",
+    "run_batch_evaluation",
+    "run_batch_evaluation_entrypoint",
+    "run_rl_baseline",
+    "run_rl_baseline_entrypoint",
+    "run_sft_baseline",
+    "run_sft_baseline_entrypoint",
     "solve_problem",
 ]

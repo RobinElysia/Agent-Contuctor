@@ -10,6 +10,8 @@ from agentconductor import (
     JudgeTestCase,
     ProblemInstance,
     PythonSubprocessJudgeAdapter,
+    SandboxBindingState,
+    SandboxCapabilityState,
     SandboxTestSpec,
     TestingOutcome,
 )
@@ -43,6 +45,8 @@ def test_python_subprocess_judge_adapter_accepts_valid_candidate() -> None:
     assert result.outcome is TestingOutcome.PASSED
     assert result.diagnostics == ("Judge accepted the candidate across 2 case(s).",)
     assert result.stdout == ""
+    assert result.runtime_capabilities is not None
+    assert result.runtime_capabilities.wall_time_limit is SandboxCapabilityState.HARD_ENFORCED
     assert tuple(case.outcome for case in result.case_results) == (
         TestingOutcome.PASSED,
         TestingOutcome.PASSED,
@@ -161,6 +165,67 @@ def test_windows_job_object_classification_maps_missing_result_to_memory_limit()
     assert diagnostics == (
         "Windows Job Object enforcement stopped the worker near the configured process memory limit before the harness emitted a result.",
     )
+
+
+def test_windows_runtime_capabilities_report_downgraded_memory_binding() -> None:
+    context = BoundProcessContext(
+        platform="win32",
+        hard_memory_limit=False,
+        hard_cpu_limit=False,
+        hard_wall_time_limit=True,
+        assigned_to_job=False,
+        memory_limit_bytes=1024,
+        launcher_strategy="windows_breakaway_from_job",
+        binding_diagnostics=(
+            "Windows Job Object binding was unavailable in this host runtime; wall-clock enforcement remains active but hard memory enforcement could not be attached.",
+        ),
+    )
+
+    capabilities = context.to_runtime_capabilities(
+        resource_limits=JudgeResourceLimits(
+            cpu_time_seconds=1.0,
+            wall_time_seconds=1.0,
+            memory_limit_bytes=1024,
+        ),
+        posix_cpu_supported=False,
+        posix_memory_supported=False,
+    )
+
+    assert capabilities.platform == "win32"
+    assert capabilities.launcher_strategy == "windows_breakaway_from_job"
+    assert capabilities.wall_time_limit is SandboxCapabilityState.HARD_ENFORCED
+    assert capabilities.cpu_limit is SandboxCapabilityState.UNSUPPORTED
+    assert capabilities.memory_limit is SandboxCapabilityState.APPROXIMATE
+    assert capabilities.memory_binding is SandboxBindingState.DOWNGRADED
+
+
+def test_windows_runtime_capabilities_report_attached_memory_binding() -> None:
+    context = BoundProcessContext(
+        platform="win32",
+        hard_memory_limit=True,
+        hard_cpu_limit=False,
+        hard_wall_time_limit=True,
+        assigned_to_job=True,
+        memory_limit_bytes=1024,
+        launcher_strategy="windows_breakaway_from_job",
+        binding_diagnostics=(
+            "Windows Job Object enforced a per-process memory limit.",
+        ),
+    )
+
+    capabilities = context.to_runtime_capabilities(
+        resource_limits=JudgeResourceLimits(
+            cpu_time_seconds=1.0,
+            wall_time_seconds=1.0,
+            memory_limit_bytes=1024,
+        ),
+        posix_cpu_supported=False,
+        posix_memory_supported=False,
+    )
+
+    assert capabilities.cpu_limit is SandboxCapabilityState.UNSUPPORTED
+    assert capabilities.memory_limit is SandboxCapabilityState.HARD_ENFORCED
+    assert capabilities.memory_binding is SandboxBindingState.ATTACHED
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows Job Objects are only available on Windows.")

@@ -8,10 +8,12 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from types import ModuleType
 
 from agentconductor.domain.execution import (
     CodeCandidate,
     JudgeCaseResult,
+    JudgeResourceLimits,
     JudgeTestCase,
     SandboxExecutionResult,
     SandboxTestSpec,
@@ -31,6 +33,13 @@ class _CompletedWorkerProcess:
     returncode: int | None
     timed_out: bool
     binding_context: BoundProcessContext
+
+
+@dataclass(frozen=True, slots=True)
+class _WorkerLaunch:
+    process: subprocess.Popen[str]
+    launcher_strategy: str
+    diagnostics: tuple[str, ...] = ()
 
 
 class PythonSubprocessJudgeAdapter:
@@ -72,6 +81,7 @@ class PythonSubprocessJudgeAdapter:
             last_stdout = ""
             last_stderr = ""
             last_exit_code: int | None = None
+            runtime_capabilities = None
 
             for case_index, test_case in enumerate(spec.test_cases):
                 result_path = sandbox_root / f"result-{case_index}.json"
@@ -88,6 +98,10 @@ class PythonSubprocessJudgeAdapter:
                     case_index=case_index,
                     result_path=result_path,
                     wall_time_seconds=wall_time_seconds,
+                    resource_limits=spec.resource_limits,
+                )
+                runtime_capabilities = _build_runtime_capabilities(
+                    binding_context=completed.binding_context,
                     resource_limits=spec.resource_limits,
                 )
 
@@ -107,6 +121,7 @@ class PythonSubprocessJudgeAdapter:
                         outcome=TestingOutcome.TIME_LIMIT_EXCEEDED,
                         diagnostics=diagnostics,
                         case_results=tuple(case_results),
+                        runtime_capabilities=runtime_capabilities,
                     )
 
                 last_stdout = completed.stdout
@@ -134,6 +149,7 @@ class PythonSubprocessJudgeAdapter:
                             stdout=completed.stdout,
                             stderr=completed.stderr,
                             exit_code=completed.returncode,
+                            runtime_capabilities=runtime_capabilities,
                         )
                     if completed.returncode is not None and completed.returncode < 0 and spec.resource_limits.cpu_time_seconds > 0:
                         diagnostics = (
@@ -154,6 +170,7 @@ class PythonSubprocessJudgeAdapter:
                             stdout=completed.stdout,
                             stderr=completed.stderr,
                             exit_code=completed.returncode,
+                            runtime_capabilities=runtime_capabilities,
                         )
                     stderr = completed.stderr.strip()
                     diagnostics = ("Judge harness did not produce a structured result.",)
@@ -168,6 +185,7 @@ class PythonSubprocessJudgeAdapter:
                         stdout=completed.stdout,
                         stderr=completed.stderr,
                         exit_code=completed.returncode,
+                        runtime_capabilities=runtime_capabilities,
                     )
 
                 payload = json.loads(result_path.read_text(encoding="utf-8"))
@@ -193,6 +211,7 @@ class PythonSubprocessJudgeAdapter:
                         stdout=payload.get("stdout", completed.stdout),
                         stderr=payload.get("stderr", completed.stderr),
                         exit_code=completed.returncode,
+                        runtime_capabilities=runtime_capabilities,
                     )
 
             return SandboxExecutionResult(
@@ -204,6 +223,7 @@ class PythonSubprocessJudgeAdapter:
                 stdout=last_stdout,
                 stderr=last_stderr,
                 exit_code=last_exit_code,
+                runtime_capabilities=runtime_capabilities,
             )
 
 
@@ -228,23 +248,19 @@ def _run_worker_process(
         "--result-path",
         result_path.name,
     ]
-    creationflags = 0
-    if sys.platform == "win32":
-        creationflags = getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0)
-    process = subprocess.Popen(
-        command,
-        cwd=sandbox_root,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        creationflags=creationflags,
-    )
+    launch = _launch_worker_process(command=command, sandbox_root=sandbox_root)
+    process = launch.process
     binding_context: BoundProcessContext | None = None
     try:
         binding_context = binder.bind(
             process_pid=process.pid,
             resource_limits=resource_limits,
         )
+        binding_context.launcher_strategy = launch.launcher_strategy
+        if launch.diagnostics:
+            binding_context.binding_diagnostics = (
+                binding_context.binding_diagnostics + launch.diagnostics
+            )
         try:
             stdout, stderr = process.communicate(timeout=wall_time_seconds)
             binding_context.observe_process_exit()
@@ -271,11 +287,88 @@ def _run_worker_process(
                     hard_memory_limit=False,
                     hard_cpu_limit=False,
                     hard_wall_time_limit=True,
+                    launcher_strategy=launch.launcher_strategy,
+                    binding_diagnostics=launch.diagnostics,
                 ),
             )
     finally:
         if binding_context is not None:
             binding_context.close()
+
+
+def _launch_worker_process(
+    *,
+    command: list[str],
+    sandbox_root: Path,
+) -> _WorkerLaunch:
+    if sys.platform == "win32":
+        breakaway_flag = getattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB", 0)
+        if breakaway_flag:
+            try:
+                process = subprocess.Popen(
+                    command,
+                    cwd=sandbox_root,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    creationflags=breakaway_flag,
+                )
+                return _WorkerLaunch(
+                    process=process,
+                    launcher_strategy="windows_breakaway_from_job",
+                )
+            except OSError as exc:
+                process = subprocess.Popen(
+                    command,
+                    cwd=sandbox_root,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                return _WorkerLaunch(
+                    process=process,
+                    launcher_strategy="plain_subprocess",
+                    diagnostics=(
+                        "Windows breakaway worker launch was unavailable; the judge fell back to plain subprocess creation.",
+                        f"Launch error: {exc.strerror or exc}.",
+                    ),
+                )
+
+    process = subprocess.Popen(
+        command,
+        cwd=sandbox_root,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    return _WorkerLaunch(process=process, launcher_strategy="plain_subprocess")
+
+
+def _build_runtime_capabilities(
+    *,
+    binding_context: BoundProcessContext,
+    resource_limits: JudgeResourceLimits,
+):
+    resource_module = _load_resource_module()
+    posix_cpu_supported = bool(
+        resource_module is not None and hasattr(resource_module, "RLIMIT_CPU")
+    )
+    posix_memory_supported = bool(
+        resource_module is not None and hasattr(resource_module, "RLIMIT_AS")
+    )
+    return binding_context.to_runtime_capabilities(
+        resource_limits=resource_limits,
+        posix_cpu_supported=posix_cpu_supported,
+        posix_memory_supported=posix_memory_supported,
+    )
+
+
+def _load_resource_module() -> ModuleType | None:
+    try:
+        import resource
+    except ImportError:
+        return None
+    return resource
 
 
 def _build_harness(*, spec: SandboxTestSpec) -> str:

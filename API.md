@@ -21,6 +21,12 @@ Stable callable API:
 - `agentconductor.solve_problem`
 - `agentconductor.plan_problem_topology`
 - `agentconductor.execute_topology_plan`
+- `agentconductor.evaluate_candidate_batch`
+- `agentconductor.run_batch_evaluation_entrypoint`
+- `agentconductor.generate_sft_dataset_entrypoint`
+- `agentconductor.run_sft_baseline_entrypoint`
+- `agentconductor.compute_reward_breakdown_entrypoint`
+- `agentconductor.run_rl_baseline_entrypoint`
 
 Stable public topology contract:
 
@@ -36,14 +42,27 @@ Other public types:
 - `agentconductor.AgentExecutionResult`
 - `agentconductor.StepExecutionResult`
 - `agentconductor.TopologyExecutionResult`
+- `agentconductor.DistributedEvaluationBatch`
+- `agentconductor.DistributedEvaluationConfig`
+- `agentconductor.DistributedEvaluationResult`
+- `agentconductor.DistributedEvaluationStatus`
+- `agentconductor.DistributedEvaluationTask`
+- `agentconductor.EvaluationProblemDefinition`
+- `agentconductor.EvaluationProblemResult`
+- `agentconductor.EvaluationRunArtifact`
+- `agentconductor.EvaluationSummary`
 - `agentconductor.ExecutionStatus`
+- `agentconductor.RewardBreakdown`
 - `agentconductor.TestingOutcome`
 - `agentconductor.CodeCandidate`
 - `agentconductor.JudgeTestCase`
 - `agentconductor.JudgeCaseResult`
 - `agentconductor.JudgeResourceLimits`
+- `agentconductor.SandboxCapabilityState`
+- `agentconductor.SandboxBindingState`
 - `agentconductor.SandboxTestSpec`
 - `agentconductor.SandboxExecutionResult`
+- `agentconductor.SandboxRuntimeCapabilities`
 - `agentconductor.PythonSubprocessJudgeAdapter`
 - `agentconductor.PythonSubprocessSandboxAdapter`
 - `agentconductor.TopologyExecutionError`
@@ -58,6 +77,11 @@ Other public types:
 - `agentconductor.SolveRequest`
 - `agentconductor.SolveResult`
 - `agentconductor.SolveStatus`
+- `agentconductor.SftTrainingArtifact`
+- `agentconductor.SftTrainingConfig`
+- `agentconductor.SyntheticTopologySample`
+- `agentconductor.RlTrainingArtifact`
+- `agentconductor.RlTrainingConfig`
 
 ## Installation and Import
 
@@ -229,6 +253,8 @@ The current judge-facing types are:
   Carries per-evaluation CPU, wall-clock, and memory limits.
 - `SandboxTestSpec`
   Bundles the target entrypoint, concrete test cases, and resource limits into the adapter request.
+- `SandboxRuntimeCapabilities`
+  Reports the active worker platform, launcher strategy, and typed wall-clock, CPU, and memory enforcement status for the evaluation.
 
 Current benchmark-aligned semantics:
 
@@ -237,6 +263,8 @@ Current benchmark-aligned semantics:
 - aggregate outcomes still map into the repository's typed `TestingOutcome` contract
 - wall-clock limits are enforced per case at the subprocess boundary instead of only within one long-lived in-process harness
 - on Windows, the judge now routes worker launch through a Job Object binding seam and targets hard process-memory limits through `memory_limit_bytes` when the host runtime permits dedicated job assignment
+- the sandbox result now carries typed runtime-capability metadata so callers can inspect whether memory binding was attached, downgraded, skipped, or not applicable
+- Windows CPU enforcement is now reported explicitly as unsupported until the repository has a verified Job Object CPU strategy
 
 Current fidelity limits:
 
@@ -246,6 +274,8 @@ Current fidelity limits:
 - POSIX CPU and memory limits use OS-level `resource` controls only on supported platforms
 - Windows hard memory enforcement depends on whether the host runtime allows the worker to be rebound into a dedicated Job Object
 - when Windows Job Object binding is unavailable, the judge keeps hard wall-clock enforcement and returns explicit platform diagnostics instead of claiming hard memory isolation
+- Windows worker launch first attempts `CREATE_BREAKAWAY_FROM_JOB` and falls back to plain subprocess creation only when that strategy is unavailable
+- Windows CPU limits are not claimed to be hard-enforced; wall-clock timeout remains the only guaranteed timing control on Windows
 - on runtimes without usable OS-level memory controls, memory limits fall back to traced Python allocations and remain approximate
 - output normalization is still a repository-level inference rather than a benchmark-specific ruleset
 - exact benchmark-specific semantics, datasets, and multi-language support are still out of scope for this milestone
@@ -268,6 +298,67 @@ Implementation inference:
 
 - prompt-shape inference is a repository-local heuristic, not a paper-defined mechanism
 - the current orchestrator is deterministic and local so it can later be replaced by a learned policy
+
+## Distributed Evaluation API
+
+### `evaluate_candidate_batch(tasks, *, config=None, orchestrator=None) -> DistributedEvaluationBatch`
+
+Evaluate multiple candidate solutions through an orchestration boundary that
+keeps submission, worker execution, and collection separate from judge logic.
+
+Behavior:
+
+- preserves task ordering in the collected batch result
+- supports explicit `max_workers`, `max_retries`, and `collection_timeout_seconds`
+- keeps `max_workers=1` as the local single-worker fallback path
+- returns typed per-task statuses plus the underlying `SandboxExecutionResult` when available
+
+## Batch Evaluation API
+
+### `run_batch_evaluation_entrypoint(dataset_path, output_path, *, max_workers=1) -> EvaluationRunArtifact`
+
+Run the current solve-and-judge stack over a JSON dataset and write a JSON
+artifact containing per-problem outcomes and an aggregate summary.
+
+Dataset format:
+
+- top-level object with a non-empty `problems` list
+- each problem must define `identifier` and `prompt`
+- `difficulty` is optional and must be `easy`, `medium`, or `hard` when present
+
+## SFT Baseline API
+
+### `generate_sft_dataset_entrypoint(dataset_path) -> tuple[SyntheticTopologySample, ...]`
+
+Generate a deterministic JSONL dataset of schema-valid topology targets derived
+from the current rule-based orchestrator.
+
+### `run_sft_baseline_entrypoint(dataset_path, artifact_path, *, epochs=1, learning_rate=1e-4, seed=0) -> SftTrainingArtifact`
+
+Validate the generated dataset and write a reproducible baseline artifact for
+the repository-local SFT stage.
+
+Implementation inference:
+
+- this stage materializes structured training data and configuration artifacts
+  but does not fine-tune the paper's full orchestrator backbone
+
+## RL Baseline API
+
+### `compute_reward_breakdown_entrypoint(topology, *, yaml_valid, execution_outcome) -> RewardBreakdown`
+
+Compute a repository-local reward breakdown from YAML validity, execution
+outcome, and topology-density signals.
+
+### `run_rl_baseline_entrypoint(dataset_path, artifact_path, *, rollouts=1, seed=0) -> RlTrainingArtifact`
+
+Run a deterministic rollout loop over the SFT dataset and write per-rollout
+reward breakdowns plus an aggregate artifact.
+
+Implementation inference:
+
+- this baseline reproduces the reward structure in a local, inspectable form
+  but does not claim to implement full GRPO optimization
 
 ## Topology Schema
 

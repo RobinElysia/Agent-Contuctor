@@ -207,6 +207,15 @@ The paper implies the need for structured objects similar to:
 
 These names are implementation suggestions, not paper terminology.
 
+Current repository-level training inference:
+
+- the SFT stage can be approximated locally by materializing deterministic,
+  schema-valid topology targets from the current rule-based orchestrator so the
+  data format and validation path exist before large-model fine-tuning is added
+- the RL stage can be approximated locally by making YAML-validity,
+  execution-outcome, and topology-density rewards explicit and inspectable even
+  before full GRPO policy optimization is implemented
+
 ### Likely Module Boundaries
 
 To align with this repository's backend architecture, the method naturally separates into:

@@ -8,7 +8,13 @@ from ctypes import wintypes
 from dataclasses import dataclass
 from typing import Protocol
 
-from agentconductor.domain.execution import JudgeResourceLimits, TestingOutcome
+from agentconductor.domain.execution import (
+    JudgeResourceLimits,
+    SandboxBindingState,
+    SandboxCapabilityState,
+    SandboxRuntimeCapabilities,
+    TestingOutcome,
+)
 
 
 _INFINITE = 0xFFFFFFFF
@@ -68,6 +74,7 @@ class BoundProcessContext:
     assigned_to_job: bool = False
     memory_limit_bytes: int | None = None
     peak_process_memory_used: int | None = None
+    launcher_strategy: str = "plain_subprocess"
     binding_diagnostics: tuple[str, ...] = ()
     _kernel32: ctypes.WinDLL | None = None
     _job_handle: int | None = None
@@ -134,6 +141,71 @@ class BoundProcessContext:
         ):
             return None
         return int(limit_info.PeakProcessMemoryUsed)
+
+    def to_runtime_capabilities(
+        self,
+        *,
+        resource_limits: JudgeResourceLimits,
+        posix_cpu_supported: bool,
+        posix_memory_supported: bool,
+    ) -> SandboxRuntimeCapabilities:
+        """Project internal binding state onto a typed capability summary."""
+        wall_time_limit = SandboxCapabilityState.NOT_REQUESTED
+        if resource_limits.wall_time_seconds > 0:
+            wall_time_limit = SandboxCapabilityState.HARD_ENFORCED
+
+        if self.platform == "win32":
+            cpu_limit = SandboxCapabilityState.NOT_REQUESTED
+            if resource_limits.cpu_time_seconds > 0:
+                cpu_limit = SandboxCapabilityState.UNSUPPORTED
+
+            memory_limit = SandboxCapabilityState.NOT_REQUESTED
+            memory_binding = SandboxBindingState.NOT_APPLICABLE
+            if resource_limits.memory_limit_bytes is not None:
+                if self.assigned_to_job and self.hard_memory_limit:
+                    memory_limit = SandboxCapabilityState.HARD_ENFORCED
+                    memory_binding = SandboxBindingState.ATTACHED
+                elif self.binding_diagnostics:
+                    memory_limit = SandboxCapabilityState.APPROXIMATE
+                    memory_binding = SandboxBindingState.DOWNGRADED
+                else:
+                    memory_limit = SandboxCapabilityState.APPROXIMATE
+                    memory_binding = SandboxBindingState.SKIPPED
+
+            return SandboxRuntimeCapabilities(
+                platform=self.platform,
+                launcher_strategy=self.launcher_strategy,
+                wall_time_limit=wall_time_limit,
+                cpu_limit=cpu_limit,
+                memory_limit=memory_limit,
+                memory_binding=memory_binding,
+                diagnostics=self.binding_diagnostics,
+            )
+
+        cpu_limit = SandboxCapabilityState.NOT_REQUESTED
+        if resource_limits.cpu_time_seconds > 0:
+            cpu_limit = (
+                SandboxCapabilityState.HARD_ENFORCED
+                if posix_cpu_supported
+                else SandboxCapabilityState.UNSUPPORTED
+            )
+
+        memory_limit = SandboxCapabilityState.NOT_REQUESTED
+        if resource_limits.memory_limit_bytes is not None:
+            memory_limit = (
+                SandboxCapabilityState.HARD_ENFORCED
+                if posix_memory_supported
+                else SandboxCapabilityState.APPROXIMATE
+            )
+
+        return SandboxRuntimeCapabilities(
+            platform=self.platform,
+            launcher_strategy=self.launcher_strategy,
+            wall_time_limit=wall_time_limit,
+            cpu_limit=cpu_limit,
+            memory_limit=memory_limit,
+            diagnostics=self.binding_diagnostics,
+        )
 
 
 class ProcessLimitBinder(Protocol):

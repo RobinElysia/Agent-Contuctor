@@ -419,7 +419,7 @@ Out of scope:
 - benchmark dataset integration
 
 ### Task ID: DEVX-01
-Status: todo
+Status: done
 Depends on: JUDGE-01
 Scope: make repository verification commands reproducible under restricted local environments
 Files:
@@ -444,7 +444,7 @@ Out of scope:
 - non-Python toolchain setup
 
 ### Task ID: SBX-04
-Status: todo
+Status: done
 Depends on: SBX-03
 Scope: improve Windows hard-memory enforcement reliability when the host runtime already runs inside an outer Job
 Files:
@@ -470,7 +470,7 @@ Out of scope:
 - distributed orchestration
 
 ### Task ID: SBX-05
-Status: todo
+Status: done
 Depends on: SBX-03
 Scope: add a verified Windows CPU-limit enforcement strategy or explicitly codify its absence behind a typed capability boundary
 Files:
@@ -496,7 +496,7 @@ Out of scope:
 - Linux or POSIX CPU-limit redesign
 
 ### Task ID: DIST-01
-Status: todo
+Status: done
 Depends on: JUDGE-01
 Scope: add distributed sandbox orchestration for parallel candidate evaluation
 Files:
@@ -522,7 +522,7 @@ Out of scope:
 - production cloud deployment hardening
 
 ### Task ID: EVAL-01
-Status: todo
+Status: done
 Depends on: JUDGE-01
 Scope: build a benchmark-scale evaluation pipeline around the current solve and judge stack
 Files:
@@ -547,7 +547,7 @@ Out of scope:
 - exact paper leaderboard reproduction
 
 ### Task ID: TRAIN-01
-Status: todo
+Status: done
 Depends on: TOP-01, ORCH-01
 Scope: build the synthetic-topology data and supervised-finetuning baseline for the orchestrator
 Files:
@@ -572,7 +572,7 @@ Out of scope:
 - deployment of trained checkpoints
 
 ### Task ID: RL-01
-Status: todo
+Status: done
 Depends on: TURN-02, SBX-01, TRAIN-01
 Scope: reproduce the paper's reward-driven RL stage for topology optimization
 Files:
@@ -595,3 +595,300 @@ Out of scope:
 - exact leaderboard reproduction
 - large-scale cluster orchestration
 - serving fine-tuned policies in production
+
+### Task ID: TOP-02
+Status: todo
+Depends on: TOP-01, ORCH-01
+Scope: add YAML-native topology serialization and parsing so the repository can exchange plans in the paper's primary representation
+Files:
+- `src/agentconductor/domain/`
+- `src/agentconductor/infrastructure/`
+- `src/agentconductor/interfaces/`
+- `tests/`
+- `API.md`
+- `docs/Paper.md`
+- `README.md`
+Implementation notes:
+- keep the typed `TopologyPlan` contract as the source of truth and treat YAML as a transport and persistence format around it
+- introduce explicit YAML encode and decode boundaries instead of leaking raw dictionaries into application services
+- preserve current validation semantics for layered DAG structure, node budgets, and testing-agent requirements after YAML round-trips
+- document any YAML schema choices that remain repository-level inferences rather than paper-stated facts
+Acceptance criteria:
+- callers can serialize a valid `TopologyPlan` into a stable YAML representation and parse it back into typed objects
+- invalid YAML syntax, schema violations, and logical topology violations are rejected with explicit diagnostics
+- tests cover at least one valid round-trip plus malformed, schema-invalid, and logic-invalid YAML inputs
+- caller-facing docs explain the YAML contract and how it relates to the existing typed topology API
+Out of scope:
+- learned orchestrator generation
+- benchmark harness integration
+- checkpoint training
+
+### Task ID: ORCH-02
+Status: todo
+Depends on: TOP-02, TURN-02
+Scope: add a model-backed orchestrator interface that generates topology YAML for online frozen inference
+Files:
+- `src/agentconductor/application/`
+- `src/agentconductor/domain/`
+- `src/agentconductor/infrastructure/`
+- `src/agentconductor/interfaces/`
+- `tests/`
+- `API.md`
+- `docs/tech.md`
+- `README.md`
+Implementation notes:
+- keep learned orchestration behind a narrow policy boundary so deterministic planning remains available for tests and fallback
+- make prompt construction, YAML extraction, parsing, and retry behavior explicit rather than embedding them in the solve loop
+- consume the existing typed revision and feedback contracts so later turns can request revised YAML topologies instead of only rule-based plans
+- support repository-local mock policies for verification when a real checkpoint is unavailable
+Acceptance criteria:
+- the repository exposes a learned-orchestrator boundary that can return YAML topology candidates for first-turn and later-turn planning
+- invalid model output is surfaced through explicit parse or validation failures rather than silent fallback
+- tests cover one successful YAML-planning path and one invalid-output handling path through the new policy boundary
+- docs describe how frozen inference chooses between deterministic and learned orchestrator paths
+Out of scope:
+- exact benchmark judge semantics
+- checkpoint fine-tuning
+- leaderboard reproduction
+
+### Task ID: BENCH-01
+Status: todo
+Depends on: JUDGE-02, EVAL-01
+Scope: define an external benchmark adapter boundary for judge semantics, dataset metadata, and run artifacts
+Files:
+- `src/agentconductor/domain/`
+- `src/agentconductor/application/`
+- `src/agentconductor/infrastructure/`
+- `tests/`
+- `API.md`
+- `docs/tech.md`
+- `README.md`
+Implementation notes:
+- separate benchmark-facing concerns from the current repository-local judge so application services do not learn benchmark-specific wire formats
+- define typed contracts for benchmark problem metadata, execution settings, verdict mapping, and artifact identifiers
+- preserve the current local judge path as an explicit fallback for development and focused testing
+- document which semantics must come from the external benchmark and which remain repository-owned
+Acceptance criteria:
+- the repository exposes a typed benchmark adapter seam distinct from the local subprocess judge
+- benchmark problem definitions and verdict mappings can be represented without leaking benchmark-native payloads into core solve services
+- tests cover contract validation and at least one adapter stub path that maps benchmark-native results into repository types
+- technical docs explain the boundary between local judge behavior and external benchmark integration
+Out of scope:
+- full benchmark execution against real datasets
+- multi-language runtime support
+- leaderboard reporting
+
+### Task ID: BENCH-02
+Status: todo
+Depends on: BENCH-01
+Scope: add benchmark dataset ingestion and normalization for the paper's target evaluation sets
+Files:
+- `src/agentconductor/application/`
+- `src/agentconductor/infrastructure/`
+- `src/agentconductor/domain/`
+- `tests/`
+- `docs/Paper.md`
+- `README.md`
+Implementation notes:
+- support explicit dataset loaders for benchmark problem statements, identifiers, difficulty metadata, and evaluation splits
+- keep dataset normalization reproducible and documented so later training and leaderboard tasks can consume the same canonical problem records
+- avoid coupling dataset storage format to one benchmark vendor layout when a typed canonical record can isolate the differences
+- document any unavailable dataset fields or licensing constraints that block exact reproduction
+Acceptance criteria:
+- the repository can load and validate canonical benchmark problem records from at least one external dataset source
+- normalized dataset artifacts preserve source identifiers and split metadata needed for later evaluation reporting
+- tests cover dataset schema validation, source-to-canonical normalization, and one small fixture-based load path
+- docs explain which benchmark datasets are wired, which are pending, and any known access constraints
+Out of scope:
+- executing benchmark submissions
+- multi-language compile and run support
+- model training
+
+### Task ID: BENCH-03
+Status: todo
+Depends on: BENCH-01, BENCH-02, DIST-01
+Scope: integrate a benchmark-backed execution path for Python problems with stricter benchmark-aligned invocation semantics
+Files:
+- `src/agentconductor/infrastructure/`
+- `src/agentconductor/application/`
+- `src/agentconductor/domain/`
+- `tests/`
+- `API.md`
+- `docs/tech.md`
+- `README.md`
+Implementation notes:
+- wire the benchmark adapter boundary to a concrete Python-first harness before expanding to more languages
+- align entrypoint, stdin or function invocation, per-case verdict mapping, and artifact capture with benchmark expectations instead of repository-local defaults
+- make it explicit when evaluation is running through the external benchmark path versus the local subprocess fallback
+- preserve inspectable diagnostics so later leaderboard analysis can distinguish harness failures from candidate failures
+Acceptance criteria:
+- the repository can execute Python benchmark problems through a concrete benchmark-backed path rather than only the local judge
+- benchmark-native verdicts and diagnostics are mapped into typed repository results without losing pass or fail categories needed by later analysis
+- tests or smoke verification cover one end-to-end Python benchmark execution path and one benchmark-specific failure path
+- docs describe the Python benchmark execution contract and any remaining fidelity gaps
+Out of scope:
+- non-Python language support
+- checkpoint training
+- exact leaderboard aggregation
+
+### Task ID: BENCH-04
+Status: todo
+Depends on: BENCH-03
+Scope: extend benchmark execution to the paper-relevant multi-language runtime surface
+Files:
+- `src/agentconductor/infrastructure/`
+- `src/agentconductor/application/`
+- `src/agentconductor/domain/`
+- `tests/`
+- `API.md`
+- `docs/tech.md`
+- `README.md`
+Implementation notes:
+- add typed language metadata, build or run commands, and verdict mapping without hard-coding language-specific behavior into application services
+- start from the languages required by the target benchmarks and document any benchmark-language combinations that remain unsupported
+- keep resource-limit semantics explicit per language runtime because compile, run, and memory behavior may differ from Python
+- preserve the local Python-only path for developer verification when full multi-language infrastructure is unavailable
+Acceptance criteria:
+- the benchmark execution path supports more than one language with explicit language-aware configuration
+- tests or smoke verification cover at least one compiled-language or non-Python execution path plus one language-specific failure mode
+- docs enumerate the supported benchmark languages and the remaining unsupported combinations
+- caller-facing contracts expose language selection without requiring benchmark-specific payload handling in user code
+Out of scope:
+- distributed cluster scheduling beyond the current orchestration boundary
+- model training
+- leaderboard result publication
+
+### Task ID: TRAIN-02
+Status: todo
+Depends on: TOP-02, ORCH-02, BENCH-02, TRAIN-01
+Scope: replace the repository-local SFT artifact baseline with checkpoint-producing supervised training for the orchestrator
+Files:
+- `src/agentconductor/application/`
+- `src/agentconductor/infrastructure/`
+- `src/agentconductor/domain/`
+- `scripts/` if introduced
+- `tests/`
+- `docs/Paper.md`
+- `docs/tech.md`
+- `README.md`
+Implementation notes:
+- train against YAML-topology targets rather than only structured JSON surrogates so the checkpoint learns the paper's primary output format
+- make backbone selection, tokenizer or prompt formatting, optimizer settings, seeds, checkpoint naming, and artifact layout explicit and reproducible
+- separate dataset preparation from actual fine-tuning execution so benchmark and synthetic data sources can be mixed intentionally
+- document every deviation from the paper's reported setup, including reduced scale, substitute backbone, or unavailable data
+Acceptance criteria:
+- the repository contains a documented SFT training path that can produce a loadable orchestrator checkpoint artifact
+- training configuration, dataset provenance, and output checkpoint locations are explicit and reproducible
+- tests or smoke verification cover config validation and checkpoint-loading metadata even if full training is too heavy for routine test runs
+- docs explain how the implemented SFT path differs from the earlier repository-local artifact baseline
+Out of scope:
+- RL optimization
+- exact leaderboard reproduction
+- production deployment of trained checkpoints
+
+### Task ID: RL-02
+Status: todo
+Depends on: TRAIN-02, BENCH-03, RL-01
+Scope: replace the repository-local RL baseline with a checkpoint-updating policy-optimization path aligned with the paper's GRPO stage
+Files:
+- `src/agentconductor/application/`
+- `src/agentconductor/infrastructure/`
+- `src/agentconductor/domain/`
+- `scripts/` if introduced
+- `tests/`
+- `docs/Paper.md`
+- `docs/tech.md`
+- `README.md`
+Implementation notes:
+- optimize the learned orchestrator checkpoint rather than only writing rollout summaries
+- keep reward calculation, rollout collection, policy update, and checkpoint management as explicit boundaries so training failures are inspectable
+- make group size, rollout count, turn budget, optimizer settings, and seed control explicit and reproducible
+- document which parts match the paper's reported GRPO setup and which still rely on implementation inference
+Acceptance criteria:
+- the repository contains a documented RL training path that updates an orchestrator checkpoint from rollout rewards
+- rollout artifacts preserve per-sample reward breakdowns, execution outcomes, and resulting checkpoint identifiers
+- tests or smoke verification cover RL config validation, artifact layout, and at least one lightweight policy-update path or stubbed trainer path
+- docs explain the fidelity boundary between the implemented RL trainer and the paper's reported setup
+Out of scope:
+- full leaderboard claims
+- large-scale distributed training infrastructure
+- production serving
+
+### Task ID: ORCH-03
+Status: todo
+Depends on: TRAIN-02, ORCH-02
+Scope: load trained orchestrator checkpoints into the online solve loop for frozen multi-turn inference
+Files:
+- `src/agentconductor/application/`
+- `src/agentconductor/infrastructure/`
+- `src/agentconductor/interfaces/`
+- `tests/`
+- `API.md`
+- `README.md`
+Implementation notes:
+- make checkpoint discovery, loading, version selection, and fallback behavior explicit rather than relying on implicit file conventions
+- preserve deterministic fallback planning for local development while allowing solve requests to opt into trained frozen inference
+- ensure later-turn revision consumes the same checkpointed orchestrator path as first-turn planning
+- document runtime constraints such as device placement, memory expectations, and tokenizer compatibility
+Acceptance criteria:
+- callers can run solve requests with a configured trained orchestrator checkpoint instead of only the deterministic planner
+- checkpoint loading failures surface as explicit configuration or runtime errors
+- tests or smoke verification cover checkpoint selection and one frozen-inference solve path using a lightweight mock or fixture checkpoint
+- docs explain how trained checkpoints plug into online inference and what artifacts are required
+Out of scope:
+- benchmark leaderboard reporting
+- benchmark dataset ingestion
+- production model serving infrastructure
+
+### Task ID: EVAL-02
+Status: todo
+Depends on: BENCH-03, ORCH-03, RL-02
+Scope: run benchmark-aligned evaluation over trained frozen inference and produce leaderboard-grade aggregate metrics
+Files:
+- `src/agentconductor/application/`
+- `src/agentconductor/interfaces/`
+- `src/agentconductor/domain/`
+- `scripts/` if introduced
+- `tests/`
+- `docs/Paper.md`
+- `README.md`
+Implementation notes:
+- keep benchmark evaluation separate from training so reported metrics are tied to explicit checkpoint and dataset versions
+- compute benchmark-facing aggregates such as pass@k or pass@1 only from normalized run artifacts rather than ad hoc logs
+- preserve enough metadata to audit solver config, benchmark split, harness version, and checkpoint provenance for every reported run
+- document when a reported metric is benchmark-aligned versus still approximate because of missing harness, data, or language support
+Acceptance criteria:
+- the repository can run a trained frozen orchestrator over benchmark-aligned datasets and emit aggregate metrics from structured artifacts
+- evaluation artifacts record dataset version, harness version, checkpoint identifier, and aggregate scores needed for later comparison
+- tests or smoke verification cover aggregate-metric calculation and one small benchmark-aligned evaluation run
+- docs explain how to reproduce a reported evaluation artifact from dataset and checkpoint inputs
+Out of scope:
+- public leaderboard submission automation
+- large-scale cluster orchestration beyond current repository boundaries
+- paper-writing or claims generation
+
+### Task ID: REPRO-01
+Status: todo
+Depends on: BENCH-04, EVAL-02
+Scope: close the remaining fidelity gaps required for exact paper-style benchmark reproduction and leaderboard comparison
+Files:
+- `docs/Paper.md`
+- `docs/tech.md`
+- `docs/tasks.md`
+- `README.md`
+- implementation files touched by any remaining gap
+- `tests/` if targeted verification is added
+Implementation notes:
+- audit the implemented training, inference, judge, and dataset paths against the paper's reported setup and record a concrete gap list
+- identify whether exact reproduction is blocked by unavailable data, proprietary harness details, missing language support, or intentionally reduced-scale training
+- only promote a reproduction claim when every blocking gap is either closed or explicitly justified with evidence
+- keep this task as the final integration gate rather than a catch-all implementation bucket
+Acceptance criteria:
+- the repository documents a line-item fidelity checklist between the implemented system and the paper's reported benchmark setup
+- any remaining blockers to exact reproduction are explicit, evidence-backed, and linked to concrete upstream tasks or external constraints
+- reported benchmark results clearly distinguish exact reproduction from approximate reproduction when applicable
+- docs give future agents a single place to see what still prevents a strict paper-level claim
+Out of scope:
+- inventing new research directions beyond the paper
+- production deployment hardening
+- unrelated API expansion

@@ -1,0 +1,9 @@
+{
+  "problems": [
+    {
+      "identifier": "example-sum",
+      "prompt": "Write a function that returns the sum of two inputs.",
+      "difficulty": "easy"
+    }
+  ]
+}

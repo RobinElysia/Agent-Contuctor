@@ -29,11 +29,18 @@ Completed milestones:
 - `JUDGE-02`: stricter judge normalization and typed per-case verdict reporting
 - `SBX-02`: stronger per-case subprocess enforcement for wall-clock limits, with platform-aware CPU and memory controls
 - `SBX-03`: Windows Job Object-backed worker binding for hard memory limits where the host runtime permits dedicated job assignment
+- `DEVX-01`: repository-local `uv` verification path for restricted cache environments
+- `SBX-04`: explicit Windows breakaway-launch and downgrade reporting for host runtimes that forbid dedicated Job attachment
+- `SBX-05`: typed Windows CPU-limit capability reporting that marks CPU enforcement unsupported until a verified strategy exists
+- `DIST-01`: local distributed evaluation boundary for parallel candidate judging with explicit concurrency, retry, and collection-timeout controls
+- `EVAL-01`: JSON-backed batch evaluation pipeline that records per-problem outcomes and aggregate summaries
+- `TRAIN-01`: synthetic topology dataset generation plus a reproducible SFT baseline artifact path
+- `RL-01`: repository-local reward breakdown and RL-style rollout artifact generation
 
 Not yet implemented:
 
 - topology YAML generation
-- training or RL reproduction
+- exact paper-scale checkpoint training or benchmark leaderboard reproduction
 
 ## Project Layout
 
@@ -166,6 +173,48 @@ Run the focused test suite:
 uv run pytest
 ```
 
+For restricted environments where `uv` cannot use a user-global cache, prefer
+the repository-local verification wrapper:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\run-tests.ps1
+```
+
+That wrapper defaults `UV_CACHE_DIR` to `.\.uv-cache` inside the repository.
+If you need a different cache location, set `UV_CACHE_DIR` explicitly before
+running either command.
+
+Preferred verification commands:
+
+- `powershell -ExecutionPolicy Bypass -File .\scripts\run-tests.ps1`
+- `uv run pytest` when the current environment already has usable cache permissions
+
+Fallback verification commands:
+
+- `$env:UV_CACHE_DIR = ".uv-cache"; uv run pytest`
+- `uv sync --locked` before the test command if the environment is not yet synced
+
+Run a small batch evaluation artifact:
+
+```powershell
+uv run python -m agentconductor.interfaces.evaluation --dataset .\examples\eval-dataset.json --output .\artifacts\eval-results.json
+```
+
+The dataset JSON must contain a `problems` list with `identifier`, `prompt`,
+and optional `difficulty` fields.
+
+Generate synthetic SFT data and run the baseline artifact path:
+
+```powershell
+uv run python -m agentconductor.interfaces.training --dataset .\artifacts\sft-dataset.jsonl --artifact .\artifacts\sft-run.json
+```
+
+Run the repository-local RL baseline over that dataset:
+
+```powershell
+uv run python -m agentconductor.interfaces.rl --dataset .\artifacts\sft-dataset.jsonl --artifact .\artifacts\rl-run.json --rollouts 2
+```
+
 ## Design Notes
 
 - The package keeps paper-method logic, application orchestration, and interfaces separated.
@@ -184,11 +233,24 @@ uv run pytest
   controlling Job that forbids rebinding child processes. In that case the
   repository keeps wall-clock enforcement, reports explicit diagnostics, and
   falls back to the existing approximate memory path.
+- Windows worker launch now attempts `CREATE_BREAKAWAY_FROM_JOB` before plain
+  subprocess fallback so the downgrade path is explicit and inspectable.
+- Windows CPU-limit enforcement is now reported as unsupported rather than
+  being implied by the generic `cpu_time_seconds` field. Hard wall-clock
+  timeout remains the only guaranteed timing control on Windows.
 - On platforms without those primitives, memory enforcement falls back to traced
   Python allocations and remains approximate.
 - The judge still normalizes line endings and trailing line whitespace in a more
   benchmark-like way, but it does not yet reproduce an external benchmark's
   full runtime semantics.
+- Parallel candidate evaluation now goes through an explicit orchestration
+  boundary with inspectable worker count, retry count, and collection timeout.
+- Batch evaluation artifacts record per-problem solve outcomes, latency, and
+  topology metadata so later training analysis can reuse them.
+- The SFT baseline materializes schema-valid synthetic topology data and writes
+  a reproducible training artifact, but it does not fine-tune a large model.
+- The RL baseline computes inspectable reward breakdowns and rollout artifacts
+  using repository-local approximations of the paper's reward terms.
 - When behavior is inferred rather than stated by the paper, the repository documents that explicitly.
 
 ## Next Likely Steps
