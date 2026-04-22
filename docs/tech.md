@@ -33,6 +33,13 @@ The repository should evolve toward a layered backend architecture:
 For runtime evaluation, candidate testing must stay behind a narrow adapter
 boundary. Application services may request candidate evaluation, but they
 should not embed subprocess orchestration or judge-specific details directly.
+External benchmark integrations should follow the same pattern: keep benchmark
+wire formats, artifact identifiers, and native verdict payloads inside a typed
+adapter seam instead of leaking them into solve or training services.
+Benchmark dataset ingestion should also normalize source-specific layouts into
+canonical repository records before training or evaluation services consume the
+problems, so split metadata and source identifiers stay reproducible without
+coupling the rest of the codebase to one vendor schema.
 
 The exact folder names may evolve, but the separation of responsibilities must remain clear.
 

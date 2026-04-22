@@ -1,6 +1,11 @@
 """AgentConductor package bootstrap and public API."""
 
 from agentconductor.application.bootstrap import bootstrap_overview
+from agentconductor.application.benchmark import (
+    evaluate_candidate_with_benchmark,
+    load_benchmark_dataset,
+    load_benchmark_dataset_entrypoint,
+)
 from agentconductor.application.distributed import evaluate_candidates_distributed
 from agentconductor.application.evaluation import (
     run_batch_evaluation,
@@ -24,6 +29,19 @@ from agentconductor.domain.distributed import (
     DistributedEvaluationResult,
     DistributedEvaluationStatus,
     DistributedEvaluationTask,
+)
+from agentconductor.domain.benchmark import (
+    BenchmarkAdapter,
+    BenchmarkArtifactIdentifiers,
+    BenchmarkDatasetFormat,
+    BenchmarkDatasetSource,
+    BenchmarkEvaluationResult,
+    BenchmarkEvaluationStatus,
+    BenchmarkExecutionSettings,
+    BenchmarkInvocationMode,
+    BenchmarkProblemDefinition,
+    BenchmarkVerdictMapping,
+    CanonicalBenchmarkDataset,
 )
 from agentconductor.domain.evaluation import (
     EvaluationProblemDefinition,
@@ -84,7 +102,16 @@ from agentconductor.infrastructure.sandbox import (
     PythonSubprocessJudgeAdapter,
     PythonSubprocessSandboxAdapter,
 )
+from agentconductor.infrastructure.benchmark import (
+    StubBenchmarkAdapter,
+    StubBenchmarkSubmission,
+)
+from agentconductor.infrastructure.benchmark_dataset import read_jsonl_objects
 from agentconductor.interfaces.api import plan_problem_topology, solve_problem
+from agentconductor.interfaces.benchmark import (
+    evaluate_candidate_against_benchmark,
+    load_canonical_benchmark_dataset,
+)
 from agentconductor.interfaces.distributed import evaluate_candidate_batch
 from agentconductor.interfaces.execution import execute_topology_plan
 
@@ -93,6 +120,17 @@ __all__ = [
     "AgentInvocation",
     "AgentReference",
     "AgentRole",
+    "BenchmarkAdapter",
+    "BenchmarkArtifactIdentifiers",
+    "BenchmarkDatasetFormat",
+    "BenchmarkDatasetSource",
+    "BenchmarkEvaluationResult",
+    "BenchmarkEvaluationStatus",
+    "BenchmarkExecutionSettings",
+    "BenchmarkInvocationMode",
+    "BenchmarkProblemDefinition",
+    "BenchmarkVerdictMapping",
+    "CanonicalBenchmarkDataset",
     "CodeCandidate",
     "DifficultyLevel",
     "DistributedEvaluationBatch",
@@ -141,15 +179,23 @@ __all__ = [
     "TopologyStep",
     "TopologyValidationError",
     "SyntheticTopologySample",
+    "StubBenchmarkAdapter",
+    "StubBenchmarkSubmission",
     "bootstrap_overview",
     "compute_reward_breakdown",
     "compute_reward_breakdown_entrypoint",
     "evaluate_candidate_batch",
+    "evaluate_candidate_against_benchmark",
+    "evaluate_candidate_with_benchmark",
     "evaluate_candidates_distributed",
     "execute_topology_plan",
     "generate_sft_dataset",
     "generate_sft_dataset_entrypoint",
+    "load_benchmark_dataset",
+    "load_benchmark_dataset_entrypoint",
+    "load_canonical_benchmark_dataset",
     "plan_problem_topology",
+    "read_jsonl_objects",
     "run_batch_evaluation",
     "run_batch_evaluation_entrypoint",
     "run_rl_baseline",

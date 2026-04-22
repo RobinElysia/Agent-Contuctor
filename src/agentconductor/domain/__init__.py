@@ -1,5 +1,18 @@
 """Domain models for AgentConductor."""
 
+from agentconductor.domain.benchmark import (
+    BenchmarkAdapter,
+    BenchmarkArtifactIdentifiers,
+    BenchmarkDatasetFormat,
+    BenchmarkDatasetSource,
+    BenchmarkEvaluationResult,
+    BenchmarkEvaluationStatus,
+    BenchmarkExecutionSettings,
+    BenchmarkInvocationMode,
+    BenchmarkProblemDefinition,
+    BenchmarkVerdictMapping,
+    CanonicalBenchmarkDataset,
+)
 from agentconductor.domain.execution import (
     AgentExecutionResult,
     CodeCandidate,
@@ -38,6 +51,17 @@ __all__ = [
     "AgentInvocation",
     "AgentReference",
     "AgentRole",
+    "BenchmarkAdapter",
+    "BenchmarkArtifactIdentifiers",
+    "BenchmarkDatasetFormat",
+    "BenchmarkDatasetSource",
+    "BenchmarkEvaluationResult",
+    "BenchmarkEvaluationStatus",
+    "BenchmarkExecutionSettings",
+    "BenchmarkInvocationMode",
+    "BenchmarkProblemDefinition",
+    "BenchmarkVerdictMapping",
+    "CanonicalBenchmarkDataset",
     "CodeCandidate",
     "ExecutionStatus",
     "JudgeCaseResult",

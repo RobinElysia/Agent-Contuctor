@@ -652,7 +652,7 @@ Out of scope:
 - leaderboard reproduction
 
 ### Task ID: BENCH-01
-Status: todo
+Status: done
 Depends on: JUDGE-02, EVAL-01
 Scope: define an external benchmark adapter boundary for judge semantics, dataset metadata, and run artifacts
 Files:
@@ -679,7 +679,7 @@ Out of scope:
 - leaderboard reporting
 
 ### Task ID: BENCH-02
-Status: todo
+Status: done
 Depends on: BENCH-01
 Scope: add benchmark dataset ingestion and normalization for the paper's target evaluation sets
 Files:

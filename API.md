@@ -21,6 +21,8 @@ Stable callable API:
 - `agentconductor.solve_problem`
 - `agentconductor.plan_problem_topology`
 - `agentconductor.execute_topology_plan`
+- `agentconductor.evaluate_candidate_against_benchmark`
+- `agentconductor.load_canonical_benchmark_dataset`
 - `agentconductor.evaluate_candidate_batch`
 - `agentconductor.run_batch_evaluation_entrypoint`
 - `agentconductor.generate_sft_dataset_entrypoint`
@@ -42,6 +44,17 @@ Other public types:
 - `agentconductor.AgentExecutionResult`
 - `agentconductor.StepExecutionResult`
 - `agentconductor.TopologyExecutionResult`
+- `agentconductor.BenchmarkAdapter`
+- `agentconductor.BenchmarkArtifactIdentifiers`
+- `agentconductor.BenchmarkDatasetFormat`
+- `agentconductor.BenchmarkDatasetSource`
+- `agentconductor.BenchmarkEvaluationResult`
+- `agentconductor.BenchmarkEvaluationStatus`
+- `agentconductor.BenchmarkExecutionSettings`
+- `agentconductor.BenchmarkInvocationMode`
+- `agentconductor.BenchmarkProblemDefinition`
+- `agentconductor.BenchmarkVerdictMapping`
+- `agentconductor.CanonicalBenchmarkDataset`
 - `agentconductor.DistributedEvaluationBatch`
 - `agentconductor.DistributedEvaluationConfig`
 - `agentconductor.DistributedEvaluationResult`
@@ -65,6 +78,8 @@ Other public types:
 - `agentconductor.SandboxRuntimeCapabilities`
 - `agentconductor.PythonSubprocessJudgeAdapter`
 - `agentconductor.PythonSubprocessSandboxAdapter`
+- `agentconductor.StubBenchmarkAdapter`
+- `agentconductor.StubBenchmarkSubmission`
 - `agentconductor.TopologyExecutionError`
 - `agentconductor.SolveState`
 - `agentconductor.SolveTurnRecord`
@@ -279,6 +294,83 @@ Current fidelity limits:
 - on runtimes without usable OS-level memory controls, memory limits fall back to traced Python allocations and remain approximate
 - output normalization is still a repository-level inference rather than a benchmark-specific ruleset
 - exact benchmark-specific semantics, datasets, and multi-language support are still out of scope for this milestone
+
+## Benchmark Adapter API
+
+### `evaluate_candidate_against_benchmark(problem, candidate, settings, *, adapter) -> BenchmarkEvaluationResult`
+
+Evaluate one extracted candidate through a typed external benchmark boundary.
+
+Parameters:
+
+- `problem: BenchmarkProblemDefinition`
+- `candidate: CodeCandidate`
+- `settings: BenchmarkExecutionSettings`
+- `adapter: BenchmarkAdapter`
+
+Behavior:
+
+- keeps benchmark problem metadata, execution settings, verdict mapping, and artifact identifiers in explicit typed contracts
+- keeps the external benchmark seam distinct from the repository-local subprocess judge
+- validates candidate language against the requested benchmark execution language before dispatch
+- returns a normalized repository `TestingOutcome` only through `BenchmarkVerdictMapping`, so core services do not consume benchmark-native payloads directly
+
+Key benchmark-facing types:
+
+- `BenchmarkProblemDefinition`
+  Canonical benchmark metadata including `benchmark_name`, `dataset_name`, `source_problem_id`, optional `split_name`, repository-facing `identifier`, `prompt`, and `language`.
+- `BenchmarkExecutionSettings`
+  External-harness execution settings such as `language`, invocation mode, entrypoint, and benchmark-owned resource limits.
+- `BenchmarkVerdictMapping`
+  Normalized mapping from a benchmark-native verdict string into repository `TestingOutcome`.
+- `BenchmarkArtifactIdentifiers`
+  Typed identifiers for benchmark-side run artifacts such as `run_id`, `submission_id`, and optional result or log URIs.
+- `BenchmarkEvaluationResult`
+  Adapter result containing adapter status, normalized verdict mapping, typed diagnostics, and optional artifact identifiers.
+
+Current scope and limits:
+
+- the repository now exposes a typed benchmark adapter seam plus one canonical dataset-ingestion path for APPS-style JSONL artifacts
+- the included `StubBenchmarkAdapter` is only for contract verification and fixture-driven tests
+- the local subprocess judge remains the explicit development fallback for current solve execution
+- real benchmark-backed Python execution remains a later milestone
+
+### `load_canonical_benchmark_dataset(dataset_path, *, source_format=BenchmarkDatasetFormat.APPS_JSONL) -> CanonicalBenchmarkDataset`
+
+Load one supported external benchmark dataset artifact into canonical problem records.
+
+Parameters:
+
+- `dataset_path: str | Path`
+- `source_format: BenchmarkDatasetFormat = BenchmarkDatasetFormat.APPS_JSONL`
+
+Behavior:
+
+- keeps source-layout parsing behind a typed dataset format selector instead of leaking vendor-specific keys into solve services
+- normalizes supported source records into canonical `BenchmarkProblemDefinition` objects
+- preserves repository-facing `identifier`, source `problem_id`, benchmark `split_name`, prompt text, language, and optional difficulty
+- returns dataset-level provenance through `BenchmarkDatasetSource`
+- records normalization assumptions through `CanonicalBenchmarkDataset.normalization_notes`
+
+Current supported dataset format:
+
+- `BenchmarkDatasetFormat.APPS_JSONL`
+  Expects one JSON object per line with `problem_id`, `question`, and `split`.
+  Optional fields: `difficulty`, `language`.
+
+Current normalization rules:
+
+- canonical identifiers are built as `apps/<split>/<problem_id>`
+- split names are normalized to lowercase `train` or `test`
+- prompt text converts CRLF or CR line endings to LF and trims trailing whitespace at line boundaries
+- APPS difficulty labels are mapped into repository tiers as an implementation inference:
+  `introductory -> easy`, `interview -> medium`, `competition -> hard`
+
+Current scope and limits:
+
+- only APPS-style JSONL ingestion is wired in this milestone
+- the repository does not bundle benchmark payloads and assumes the caller has legitimate local access to the source artifact
+- benchmark-specific test cases, execution payloads, and leaderboard reporting remain later milestones
 
 ## Topology Planning API
 

@@ -10,6 +10,8 @@ The repository currently provides:
 - a typed multi-turn solve-state contract for turn history and later revision
 - a deterministic topology planner that emits validated single-turn plans
 - a single-turn graph executor whose testing role runs through a local subprocess judge adapter
+- a typed external benchmark adapter seam for benchmark metadata, verdict normalization, and run artifact identifiers
+- canonical benchmark dataset ingestion for APPS-style JSONL records
 - focused tests for the bootstrap and API layers
 
 The repository does not yet implement the full paper runtime. The current API can run up to the configured turn budget with deterministic topology revision and local judge-backed evaluation, but the judge remains a repository-local approximation rather than an exact benchmark integration.
@@ -36,10 +38,13 @@ Completed milestones:
 - `EVAL-01`: JSON-backed batch evaluation pipeline that records per-problem outcomes and aggregate summaries
 - `TRAIN-01`: synthetic topology dataset generation plus a reproducible SFT baseline artifact path
 - `RL-01`: repository-local reward breakdown and RL-style rollout artifact generation
+- `BENCH-01`: typed external benchmark adapter seam for execution metadata and verdict mapping
+- `BENCH-02`: canonical benchmark dataset ingestion and normalization for APPS-style JSONL artifacts
 
 Not yet implemented:
 
 - topology YAML generation
+- real benchmark-backed execution beyond dataset ingestion
 - exact paper-scale checkpoint training or benchmark leaderboard reproduction
 
 ## Project Layout
@@ -243,6 +248,19 @@ uv run python -m agentconductor.interfaces.rl --dataset .\artifacts\sft-dataset.
 - The judge still normalizes line endings and trailing line whitespace in a more
   benchmark-like way, but it does not yet reproduce an external benchmark's
   full runtime semantics.
+- External benchmark integration now has its own typed adapter boundary for
+  benchmark problem metadata, execution settings, verdict mapping, and run
+  artifact identifiers.
+- The bundled benchmark adapter is a deterministic stub used to verify the
+  contract; it does not execute against a real benchmark service yet.
+- Benchmark dataset ingestion now supports a local APPS-style JSONL source and
+  normalizes it into canonical `BenchmarkProblemDefinition` records.
+- The current APPS normalization maps `introductory`, `interview`, and
+  `competition` difficulty labels to repository `easy`, `medium`, and `hard`
+  tiers as an implementation inference rather than a paper-stated rule.
+- LiveCodeBench, CodeContests, HumanEval, and MBPP dataset ingestion are still
+  pending, and the repository does not bundle proprietary or license-restricted
+  benchmark payloads.
 - Parallel candidate evaluation now goes through an explicit orchestration
   boundary with inspectable worker count, retry count, and collection timeout.
 - Batch evaluation artifacts record per-problem solve outcomes, latency, and
@@ -255,4 +273,6 @@ uv run python -m agentconductor.interfaces.rl --dataset .\artifacts\sft-dataset.
 
 ## Next Likely Steps
 
-- add training and RL reproduction paths
+- add a concrete Python-first external benchmark execution path
+- extend benchmark dataset normalization beyond APPS-style JSONL sources
+- extend checkpoint-producing SFT and frozen-inference orchestration paths

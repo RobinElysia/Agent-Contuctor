@@ -169,6 +169,12 @@ The paper reports that AgentConductor improves pass@1 over strong baselines whil
 - difficulty-aware topology scaling
 - multi-turn topology revision
 
+Current repository ingestion status:
+
+- APPS-style JSONL dataset ingestion is wired into canonical repository problem records
+- the repository normalizes APPS difficulty labels into `easy`, `medium`, and `hard` as an implementation inference for later topology-budget and reporting paths
+- LiveCodeBench v4, CodeContests, HumanEval, and MBPP dataset loaders are still pending
+
 ## Implementation-Oriented Interpretation
 
 ### Minimum Runtime Components
