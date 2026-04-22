@@ -1,2 +1,2 @@
-{"problem_id":"42","question":"Add two integers.\r\nReturn their sum.   \r\n","difficulty":"Introductory","split":"TRAIN","language":"Python"}
-{"problem_id":"314","question":"Read n integers and print the maximum value.","difficulty":"competition","split":"test"}
+{"problem_id":"42","question":"Add two integers.\r\nReturn their sum.   \r\n","difficulty":"Introductory","split":"TRAIN","language":"Python","input_output":"{\"fn_name\": \"solve\", \"inputs\": [[1, 2], [5, 7]], \"outputs\": [3, 12]}"}
+{"problem_id":"314","question":"Read n integers and print the maximum value.","difficulty":"competition","split":"test","input_output":"{\"inputs\": [\"3\\n1 5 2\\n\"], \"outputs\": [\"5\\n\"]}"}

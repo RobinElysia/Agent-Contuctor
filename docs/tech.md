@@ -40,6 +40,9 @@ Benchmark dataset ingestion should also normalize source-specific layouts into
 canonical repository records before training or evaluation services consume the
 problems, so split metadata and source identifiers stay reproducible without
 coupling the rest of the codebase to one vendor schema.
+When benchmark datasets also carry executable metadata, that metadata should be
+normalized into typed benchmark-owned invocation settings and test cases before
+any local subprocess judge or runtime adapter consumes it.
 
 The exact folder names may evolve, but the separation of responsibilities must remain clear.
 

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Protocol
+from typing import Any, Protocol
 
 from agentconductor.domain.execution import CodeCandidate, TestingOutcome
 from agentconductor.domain.models import DifficultyLevel, ProblemInstance
@@ -92,6 +92,26 @@ class BenchmarkExecutionSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class BenchmarkTestCase:
+    """One benchmark-owned test case kept separate from local judge payloads."""
+
+    name: str
+    arguments: tuple[Any, ...] = ()
+    keyword_arguments: tuple[tuple[str, Any], ...] = ()
+    stdin_text: str | None = None
+    expected_output: Any = None
+    expected_stdout: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            raise ValueError("name must be a non-empty string")
+        if self.expected_output is None and self.expected_stdout is None:
+            raise ValueError(
+                "benchmark test cases must define expected_output or expected_stdout"
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class BenchmarkVerdictMapping:
     """Typed mapping from a benchmark-native verdict into repository semantics."""
 
@@ -161,6 +181,7 @@ class BenchmarkAdapter(Protocol):
         problem: BenchmarkProblemDefinition,
         candidate: CodeCandidate,
         settings: BenchmarkExecutionSettings,
+        test_cases: tuple[BenchmarkTestCase, ...] = (),
     ) -> BenchmarkEvaluationResult:
         """Run one candidate through an external benchmark boundary."""
 
@@ -184,13 +205,30 @@ class BenchmarkDatasetSource:
 
 
 @dataclass(frozen=True, slots=True)
+class CanonicalBenchmarkRecord:
+    """Canonical benchmark execution record derived from one dataset row."""
+
+    problem: BenchmarkProblemDefinition
+    execution_settings: BenchmarkExecutionSettings = field(
+        default_factory=BenchmarkExecutionSettings
+    )
+    test_cases: tuple[BenchmarkTestCase, ...] = ()
+    normalization_notes: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class CanonicalBenchmarkDataset:
     """Canonical benchmark records produced from one external source artifact."""
 
     source: BenchmarkDatasetSource
-    problems: tuple[BenchmarkProblemDefinition, ...]
+    records: tuple[CanonicalBenchmarkRecord, ...]
     normalization_notes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        if not self.problems:
+        if not self.records:
             raise ValueError("canonical benchmark dataset must contain at least one problem")
+
+    @property
+    def problems(self) -> tuple[BenchmarkProblemDefinition, ...]:
+        """Return canonical problem metadata for compatibility with earlier callers."""
+        return tuple(record.problem for record in self.records)

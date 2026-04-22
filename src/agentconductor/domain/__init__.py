@@ -10,8 +10,10 @@ from agentconductor.domain.benchmark import (
     BenchmarkExecutionSettings,
     BenchmarkInvocationMode,
     BenchmarkProblemDefinition,
+    BenchmarkTestCase,
     BenchmarkVerdictMapping,
     CanonicalBenchmarkDataset,
+    CanonicalBenchmarkRecord,
 )
 from agentconductor.domain.execution import (
     AgentExecutionResult,
@@ -60,8 +62,10 @@ __all__ = [
     "BenchmarkExecutionSettings",
     "BenchmarkInvocationMode",
     "BenchmarkProblemDefinition",
+    "BenchmarkTestCase",
     "BenchmarkVerdictMapping",
     "CanonicalBenchmarkDataset",
+    "CanonicalBenchmarkRecord",
     "CodeCandidate",
     "ExecutionStatus",
     "JudgeCaseResult",

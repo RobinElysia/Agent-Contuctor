@@ -172,6 +172,8 @@ The paper reports that AgentConductor improves pass@1 over strong baselines whil
 Current repository ingestion status:
 
 - APPS-style JSONL dataset ingestion is wired into canonical repository problem records
+- APPS rows with `input_output` payloads are also normalized into canonical benchmark execution records with invocation settings and benchmark-owned test cases
+- the current Python benchmark harness can execute those canonical records through a typed adapter boundary
 - the repository normalizes APPS difficulty labels into `easy`, `medium`, and `hard` as an implementation inference for later topology-budget and reporting paths
 - LiveCodeBench v4, CodeContests, HumanEval, and MBPP dataset loaders are still pending
 

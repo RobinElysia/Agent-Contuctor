@@ -705,7 +705,7 @@ Out of scope:
 - model training
 
 ### Task ID: BENCH-03
-Status: todo
+Status: done
 Depends on: BENCH-01, BENCH-02, DIST-01
 Scope: integrate a benchmark-backed execution path for Python problems with stricter benchmark-aligned invocation semantics
 Files:

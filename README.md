@@ -12,6 +12,7 @@ The repository currently provides:
 - a single-turn graph executor whose testing role runs through a local subprocess judge adapter
 - a typed external benchmark adapter seam for benchmark metadata, verdict normalization, and run artifact identifiers
 - canonical benchmark dataset ingestion for APPS-style JSONL records
+- a concrete Python benchmark execution path that evaluates canonical benchmark records through benchmark-owned test cases
 - focused tests for the bootstrap and API layers
 
 The repository does not yet implement the full paper runtime. The current API can run up to the configured turn budget with deterministic topology revision and local judge-backed evaluation, but the judge remains a repository-local approximation rather than an exact benchmark integration.
@@ -40,11 +41,12 @@ Completed milestones:
 - `RL-01`: repository-local reward breakdown and RL-style rollout artifact generation
 - `BENCH-01`: typed external benchmark adapter seam for execution metadata and verdict mapping
 - `BENCH-02`: canonical benchmark dataset ingestion and normalization for APPS-style JSONL artifacts
+- `BENCH-03`: concrete Python benchmark execution path over canonical benchmark records
 
 Not yet implemented:
 
 - topology YAML generation
-- real benchmark-backed execution beyond dataset ingestion
+- benchmark execution beyond the current Python-first path
 - exact paper-scale checkpoint training or benchmark leaderboard reproduction
 
 ## Project Layout
@@ -255,6 +257,14 @@ uv run python -m agentconductor.interfaces.rl --dataset .\artifacts\sft-dataset.
   contract; it does not execute against a real benchmark service yet.
 - Benchmark dataset ingestion now supports a local APPS-style JSONL source and
   normalizes it into canonical `BenchmarkProblemDefinition` records.
+- The repository now also exposes canonical benchmark execution records with
+  benchmark-owned invocation settings and test cases, plus a concrete
+  `PythonBenchmarkJudgeAdapter` that runs those records through the benchmark
+  adapter boundary.
+- The current Python benchmark path supports function-style and stdin-style
+  problem records, but stdin execution still routes through a repository-owned
+  `solve()` callable that reads from `stdin`; that remains an approximation of
+  benchmarks that execute full scripts or compiled entrypoints.
 - The current APPS normalization maps `introductory`, `interview`, and
   `competition` difficulty labels to repository `easy`, `medium`, and `hard`
   tiers as an implementation inference rather than a paper-stated rule.
@@ -273,6 +283,6 @@ uv run python -m agentconductor.interfaces.rl --dataset .\artifacts\sft-dataset.
 
 ## Next Likely Steps
 
-- add a concrete Python-first external benchmark execution path
 - extend benchmark dataset normalization beyond APPS-style JSONL sources
+- strengthen benchmark execution fidelity beyond the current Python callable-based harness
 - extend checkpoint-producing SFT and frozen-inference orchestration paths

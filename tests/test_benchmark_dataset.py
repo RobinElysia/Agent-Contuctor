@@ -4,6 +4,7 @@ import pytest
 
 from agentconductor import (
     BenchmarkDatasetFormat,
+    BenchmarkInvocationMode,
     DifficultyLevel,
     load_benchmark_dataset,
     load_canonical_benchmark_dataset,
@@ -44,6 +45,8 @@ def test_load_benchmark_dataset_normalizes_apps_records(tmp_path: Path) -> None:
     assert problem.prompt == "Solve it.\nExplain."
     assert problem.difficulty is DifficultyLevel.MEDIUM
     assert "introductory->easy" in dataset.normalization_notes[1]
+    assert dataset.records[0].execution_settings.invocation_mode is BenchmarkInvocationMode.FUNCTION
+    assert dataset.records[0].test_cases == ()
 
 
 def test_load_canonical_benchmark_dataset_reads_fixture_path() -> None:
@@ -59,5 +62,12 @@ def test_load_canonical_benchmark_dataset_reads_fixture_path() -> None:
     assert len(dataset.problems) == 2
     assert dataset.problems[0].identifier == "apps/train/42"
     assert dataset.problems[0].difficulty is DifficultyLevel.EASY
+    assert dataset.records[0].execution_settings.invocation_mode is BenchmarkInvocationMode.FUNCTION
+    assert dataset.records[0].execution_settings.entrypoint == "solve"
+    assert len(dataset.records[0].test_cases) == 2
+    assert dataset.records[0].test_cases[0].arguments == (1, 2)
     assert dataset.problems[1].identifier == "apps/test/314"
     assert dataset.problems[1].difficulty is DifficultyLevel.HARD
+    assert dataset.records[1].execution_settings.invocation_mode is BenchmarkInvocationMode.STDIN
+    assert dataset.records[1].test_cases[0].stdin_text == "3\n1 5 2\n"
+    assert dataset.records[1].test_cases[0].expected_stdout == "5\n"

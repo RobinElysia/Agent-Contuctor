@@ -6,15 +6,17 @@ from pathlib import Path
 
 from agentconductor.application.benchmark import (
     evaluate_candidate_with_benchmark,
+    evaluate_candidate_with_benchmark_record,
     load_benchmark_dataset_entrypoint,
 )
 from agentconductor.domain.benchmark import (
     BenchmarkAdapter,
     BenchmarkDatasetFormat,
+    BenchmarkProblemDefinition,
     CanonicalBenchmarkDataset,
+    CanonicalBenchmarkRecord,
     BenchmarkEvaluationResult,
     BenchmarkExecutionSettings,
-    BenchmarkProblemDefinition,
 )
 from agentconductor.domain.execution import CodeCandidate
 
@@ -44,4 +46,18 @@ def load_canonical_benchmark_dataset(
     return load_benchmark_dataset_entrypoint(
         dataset_path,
         source_format=source_format,
+    )
+
+
+def evaluate_candidate_against_benchmark_record(
+    record: CanonicalBenchmarkRecord,
+    candidate: CodeCandidate,
+    *,
+    adapter: BenchmarkAdapter,
+) -> BenchmarkEvaluationResult:
+    """Evaluate one candidate against a canonical benchmark dataset record."""
+    return evaluate_candidate_with_benchmark_record(
+        record,
+        candidate,
+        adapter=adapter,
     )

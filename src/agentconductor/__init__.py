@@ -3,6 +3,7 @@
 from agentconductor.application.bootstrap import bootstrap_overview
 from agentconductor.application.benchmark import (
     evaluate_candidate_with_benchmark,
+    evaluate_candidate_with_benchmark_record,
     load_benchmark_dataset,
     load_benchmark_dataset_entrypoint,
 )
@@ -40,8 +41,10 @@ from agentconductor.domain.benchmark import (
     BenchmarkExecutionSettings,
     BenchmarkInvocationMode,
     BenchmarkProblemDefinition,
+    BenchmarkTestCase,
     BenchmarkVerdictMapping,
     CanonicalBenchmarkDataset,
+    CanonicalBenchmarkRecord,
 )
 from agentconductor.domain.evaluation import (
     EvaluationProblemDefinition,
@@ -103,6 +106,7 @@ from agentconductor.infrastructure.sandbox import (
     PythonSubprocessSandboxAdapter,
 )
 from agentconductor.infrastructure.benchmark import (
+    PythonBenchmarkJudgeAdapter,
     StubBenchmarkAdapter,
     StubBenchmarkSubmission,
 )
@@ -110,6 +114,7 @@ from agentconductor.infrastructure.benchmark_dataset import read_jsonl_objects
 from agentconductor.interfaces.api import plan_problem_topology, solve_problem
 from agentconductor.interfaces.benchmark import (
     evaluate_candidate_against_benchmark,
+    evaluate_candidate_against_benchmark_record,
     load_canonical_benchmark_dataset,
 )
 from agentconductor.interfaces.distributed import evaluate_candidate_batch
@@ -129,8 +134,10 @@ __all__ = [
     "BenchmarkExecutionSettings",
     "BenchmarkInvocationMode",
     "BenchmarkProblemDefinition",
+    "BenchmarkTestCase",
     "BenchmarkVerdictMapping",
     "CanonicalBenchmarkDataset",
+    "CanonicalBenchmarkRecord",
     "CodeCandidate",
     "DifficultyLevel",
     "DistributedEvaluationBatch",
@@ -148,6 +155,7 @@ __all__ = [
     "JudgeTestCase",
     "ProblemInstance",
     "ProjectOverview",
+    "PythonBenchmarkJudgeAdapter",
     "PythonSubprocessJudgeAdapter",
     "PythonSubprocessSandboxAdapter",
     "RewardBreakdown",
@@ -186,7 +194,9 @@ __all__ = [
     "compute_reward_breakdown_entrypoint",
     "evaluate_candidate_batch",
     "evaluate_candidate_against_benchmark",
+    "evaluate_candidate_against_benchmark_record",
     "evaluate_candidate_with_benchmark",
+    "evaluate_candidate_with_benchmark_record",
     "evaluate_candidates_distributed",
     "execute_topology_plan",
     "generate_sft_dataset",
