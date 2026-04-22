@@ -732,7 +732,7 @@ Out of scope:
 - exact leaderboard aggregation
 
 ### Task ID: BENCH-04
-Status: todo
+Status: done
 Depends on: BENCH-03
 Scope: extend benchmark execution to the paper-relevant multi-language runtime surface
 Files:

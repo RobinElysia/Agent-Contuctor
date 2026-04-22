@@ -106,6 +106,8 @@ from agentconductor.infrastructure.sandbox import (
     PythonSubprocessSandboxAdapter,
 )
 from agentconductor.infrastructure.benchmark import (
+    MultiLanguageBenchmarkJudgeAdapter,
+    NodeJsBenchmarkJudgeAdapter,
     PythonBenchmarkJudgeAdapter,
     StubBenchmarkAdapter,
     StubBenchmarkSubmission,
@@ -154,6 +156,7 @@ __all__ = [
     "JudgeResourceLimits",
     "JudgeTestCase",
     "ProblemInstance",
+    "NodeJsBenchmarkJudgeAdapter",
     "ProjectOverview",
     "PythonBenchmarkJudgeAdapter",
     "PythonSubprocessJudgeAdapter",
@@ -187,6 +190,7 @@ __all__ = [
     "TopologyStep",
     "TopologyValidationError",
     "SyntheticTopologySample",
+    "MultiLanguageBenchmarkJudgeAdapter",
     "StubBenchmarkAdapter",
     "StubBenchmarkSubmission",
     "bootstrap_overview",

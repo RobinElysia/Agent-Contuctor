@@ -81,7 +81,9 @@ Other public types:
 - `agentconductor.SandboxRuntimeCapabilities`
 - `agentconductor.PythonSubprocessJudgeAdapter`
 - `agentconductor.PythonSubprocessSandboxAdapter`
+- `agentconductor.NodeJsBenchmarkJudgeAdapter`
 - `agentconductor.PythonBenchmarkJudgeAdapter`
+- `agentconductor.MultiLanguageBenchmarkJudgeAdapter`
 - `agentconductor.StubBenchmarkAdapter`
 - `agentconductor.StubBenchmarkSubmission`
 - `agentconductor.TopologyExecutionError`
@@ -339,7 +341,7 @@ Current scope and limits:
 - the repository now exposes a typed benchmark adapter seam plus one canonical dataset-ingestion path for APPS-style JSONL artifacts
 - the included `StubBenchmarkAdapter` is only for contract verification and fixture-driven tests
 - the local subprocess judge remains the explicit development fallback for current solve execution
-- the repository now includes a concrete Python-first benchmark execution adapter, but it still remains a local harness rather than a remote benchmark service
+- the repository now includes concrete Python and Node.js benchmark execution adapters plus a multi-language dispatch adapter, but they still remain local harnesses rather than remote benchmark services
 
 ### `load_canonical_benchmark_dataset(dataset_path, *, source_format=BenchmarkDatasetFormat.APPS_JSONL) -> CanonicalBenchmarkDataset`
 
@@ -379,7 +381,7 @@ Current scope and limits:
 - only APPS-style JSONL ingestion is wired in this milestone
 - the repository does not bundle benchmark payloads and assumes the caller has legitimate local access to the source artifact
 - some APPS rows may still load as metadata-only records when they do not include executable `input_output` payloads
-- benchmark-specific leaderboard reporting and non-Python runtime support remain later milestones
+- benchmark-specific leaderboard reporting and compiled-language runtime support remain later milestones
 
 ### `evaluate_candidate_against_benchmark_record(record, candidate, *, adapter) -> BenchmarkEvaluationResult`
 
@@ -398,18 +400,26 @@ Behavior:
 - preserves the distinction between metadata-only canonical records and executable records with benchmark-owned test cases
 - allows benchmark execution to consume the canonical dataset layer directly instead of rebuilding ad hoc test specs outside the adapter seam
 
-Current concrete Python path:
+Current concrete benchmark paths:
 
 - `PythonBenchmarkJudgeAdapter`
-  Uses the repository's subprocess sandbox as the worker runtime, but evaluates
-  through benchmark-owned `BenchmarkTestCase` values and emits benchmark-style
-  verdict strings such as `accepted` and `wrong_answer`.
+  Uses the repository's subprocess sandbox for function-style Python cases and a
+  standalone script path for stdin-style Python cases.
+- `NodeJsBenchmarkJudgeAdapter`
+  Evaluates JavaScript benchmark records through local Node.js execution and
+  emits benchmark-style verdict strings such as `accepted` and
+  `compilation_error`.
+- `MultiLanguageBenchmarkJudgeAdapter`
+  Dispatches to the configured Python or Node.js benchmark harness based on the
+  canonical record's `BenchmarkExecutionSettings.language`.
 
 Current fidelity limits:
 
-- function-style invocation is closest to benchmark semantics when `fn_name` is available
-- stdin-style execution still calls a repository-owned `solve()` function that reads from `stdin` instead of executing an unrestricted script entrypoint
+- Python and JavaScript function-style invocation is closest to benchmark semantics when `fn_name` is available
+- stdin-style Python and JavaScript execution now runs the candidate as a standalone script with benchmark-owned stdin payloads
+- the JavaScript function path expects a CommonJS export and adds a repository-local compatibility shim for top-level `solve(...)` definitions
 - artifact capture is local and file-based rather than vendor-native
+- benchmark-specific output normalization rules and compiled-language runtimes remain later milestones
 
 ## Topology Planning API
 

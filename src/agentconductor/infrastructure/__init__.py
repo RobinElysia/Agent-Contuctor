@@ -1,6 +1,8 @@
 """Infrastructure adapters for AgentConductor."""
 
 from agentconductor.infrastructure.benchmark import (
+    MultiLanguageBenchmarkJudgeAdapter,
+    NodeJsBenchmarkJudgeAdapter,
     PythonBenchmarkJudgeAdapter,
     StubBenchmarkAdapter,
     StubBenchmarkSubmission,
@@ -14,7 +16,9 @@ from agentconductor.infrastructure.sandbox import (
 __all__ = [
     "PythonSubprocessJudgeAdapter",
     "PythonSubprocessSandboxAdapter",
+    "NodeJsBenchmarkJudgeAdapter",
     "PythonBenchmarkJudgeAdapter",
+    "MultiLanguageBenchmarkJudgeAdapter",
     "read_jsonl_objects",
     "StubBenchmarkAdapter",
     "StubBenchmarkSubmission",

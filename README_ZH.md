@@ -7,6 +7,9 @@ AgentConductor 是一个面向后端的 Python 项目，旨在将论文 `2602.17
 - 使用 `uv` 管理的 `src/` 布局 Python 包
 - 基于论文提炼的带类型领域模型
 - 第一个稳定的、面向问题调用的 Python API 边界
+- 面向 benchmark 元数据、verdict 映射和运行产物的带类型 adapter seam
+- APPS 风格 JSONL benchmark 数据集的 canonical ingestion
+- 面向 Python 和 JavaScript canonical benchmark record 的多语言执行路径
 - 针对引导层和 API 层的聚焦测试
 
 该仓库尚未实现完整的论文运行时。当前 API 返回的是符合论文约束的结构化解题计划，而非完整的拓扑执行结果。
@@ -19,14 +22,16 @@ AgentConductor 是一个面向后端的 Python 项目，旨在将论文 `2602.17
 - `RES-01`：在 `docs/Paper.md` 中面向实现的论文提炼
 - `BOOT-01`：包引导、入口点和测试
 - `API-01`：第一个带类型的可调用 API 边界
+- `BENCH-01`：外部 benchmark adapter 的带类型契约边界
+- `BENCH-02`：APPS 风格 benchmark 数据集 ingestion 与 canonical normalization
+- `BENCH-03`：基于 canonical benchmark record 的 Python 执行路径
+- `BENCH-04`：Python/JavaScript 多语言 benchmark dispatch，以及更严格的 stdin 脚本执行语义
 
 尚未实现：
 
 - 拓扑 YAML 生成
-- 拓扑验证和图执行
-- 沙箱支持的代码执行
-- 多轮拓扑精化
-- 训练或强化学习的复现
+- 超出当前 Python/JavaScript 本地 harness 的 benchmark 执行
+- 精确到论文规模的 checkpoint 训练或 benchmark leaderboard 复现
 
 ## 项目布局
 
@@ -125,11 +130,13 @@ uv run pytest tests/test_bootstrap.py tests/test_api.py
 
 - 该包将论文方法逻辑、应用编排和接口分离。
 - 第一个 API 有意保持窄范围。它是一个稳定的 Python 边界，而不是 HTTP 服务。
+- benchmark 集成现在有独立的带类型边界，用于承载 benchmark 问题元数据、执行设置、verdict 映射和运行产物标识。
+- 当前 benchmark runtime 支持 Python 和 JavaScript。function-style record 走语言感知的调用边界，stdin-style record 则按独立脚本执行，更接近真实 benchmark 语义。
+- JavaScript function 路径支持 CommonJS export，同时对顶层 `solve(...)` 定义加了一层窄兼容 shim；这一点属于实现推断，不是 benchmark 原生规则。
 - 当行为是推断而非论文明确说明时，仓库会显式记录这一点。
 
 ## 接下来的可能步骤
 
-- 定义拓扑模式和验证器
-- 实现基于分层 agent 步骤的图执行
-- 将解题请求连接到真实的拓扑生成
-- 添加结构化的执行反馈和轮次历史
+- 将 benchmark dataset normalization 扩展到 APPS 之外的数据源
+- 将 benchmark execution 扩展到当前 Python/JavaScript 本地 harness 之外，尤其是编译型语言和 vendor-native runtime
+- 继续推进 checkpoint 训练与 frozen-inference orchestration 路径

@@ -43,6 +43,13 @@ coupling the rest of the codebase to one vendor schema.
 When benchmark datasets also carry executable metadata, that metadata should be
 normalized into typed benchmark-owned invocation settings and test cases before
 any local subprocess judge or runtime adapter consumes it.
+Current repository benchmark execution supports Python and JavaScript as
+explicit runtime selections. Language dispatch should stay inside
+infrastructure adapters rather than leaking language-specific branching into
+application services.
+For stdin-style benchmark records, adapters should prefer standalone script
+execution over repository-owned `solve()` wrappers so the remaining fidelity
+gaps stay narrow and documented.
 
 The exact folder names may evolve, but the separation of responsibilities must remain clear.
 
