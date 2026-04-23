@@ -7,9 +7,9 @@ name = "agentconductor"
 version = "0.1.0"
 description = "Reusable Python package for reproducing the AgentConductor topology orchestration method."
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = { text = "Apache-2.0 license" }
 authors = [
-  { name = "OpenAI Codex" },
+  { name = "RobinElysia" },
 ]
 keywords = [
   "multi-agent",
