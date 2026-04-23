@@ -9,9 +9,12 @@ from agentconductor.application.history import (
 )
 from agentconductor.application.orchestrator import (
     plan_topology_for_problem,
+    plan_topology_with_policy,
     revise_topology_for_feedback,
+    revise_topology_with_policy,
 )
 from agentconductor.domain.execution import TestingOutcome
+from agentconductor.domain.orchestration import OrchestratorMode, TopologyOrchestratorPolicy
 from agentconductor.domain.models import (
     DifficultyLevel,
     ProblemInstance,
@@ -21,7 +24,12 @@ from agentconductor.domain.models import (
 )
 
 
-def solve_request(request: SolveRequest) -> SolveResult:
+def solve_request(
+    request: SolveRequest,
+    *,
+    orchestrator_policy: TopologyOrchestratorPolicy | None = None,
+    orchestrator_max_attempts: int = 1,
+) -> SolveResult:
     """Prepare and execute a typed single-turn solve request.
 
     Inference:
@@ -50,7 +58,19 @@ def solve_request(request: SolveRequest) -> SolveResult:
         max_nodes=max_nodes,
         available_roles=overview.supported_roles,
     )
-    topology = plan_topology_for_problem(problem)
+    orchestrator_mode = (
+        OrchestratorMode.LEARNED
+        if orchestrator_policy is not None
+        else OrchestratorMode.DETERMINISTIC
+    )
+    if orchestrator_policy is None:
+        topology = plan_topology_for_problem(problem)
+    else:
+        topology = plan_topology_with_policy(
+            problem,
+            policy=orchestrator_policy,
+            max_attempts=orchestrator_max_attempts,
+        ).topology
     execution = execute_topology(problem, topology)
     solve_state = append_turn_result(solve_state, topology=topology, execution=execution)
 
@@ -59,7 +79,14 @@ def solve_request(request: SolveRequest) -> SolveResult:
         and solve_state.can_continue
     ):
         revision_input = build_revision_input(solve_state)
-        topology = revise_topology_for_feedback(revision_input)
+        if orchestrator_policy is None:
+            topology = revise_topology_for_feedback(revision_input)
+        else:
+            topology = revise_topology_with_policy(
+                revision_input,
+                policy=orchestrator_policy,
+                max_attempts=orchestrator_max_attempts,
+            ).topology
         execution = execute_topology(problem, topology)
         solve_state = append_turn_result(solve_state, topology=topology, execution=execution)
 
@@ -82,7 +109,8 @@ def solve_request(request: SolveRequest) -> SolveResult:
         testing_outcome=execution.testing_outcome,
         solve_state=solve_state,
         notes=(
-            "This API performs deterministic topology planning plus bounded multi-turn execution.",
+            "This API performs bounded multi-turn execution over an explicit orchestrator boundary.",
+            f"Topology planning mode: {orchestrator_mode.value}.",
             "Later turns consume typed testing feedback through a local revision-input contract.",
             "Testing outcomes now come from a repository-local Python subprocess judge adapter.",
         ),

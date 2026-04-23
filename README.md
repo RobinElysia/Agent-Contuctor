@@ -6,9 +6,10 @@ The repository currently provides:
 
 - a `src/`-layout Python package managed with `uv`
 - typed domain models derived from the paper distillation
-- a stable Python solve API for deterministic planning plus bounded multi-turn execution
+- a stable Python solve API for bounded multi-turn execution over deterministic or learned orchestrator paths
 - a typed multi-turn solve-state contract for turn history and later revision
 - a deterministic topology planner that emits validated single-turn plans
+- a learned-orchestrator policy boundary that produces topology YAML candidates and parses them into validated typed plans
 - a single-turn graph executor whose testing role runs through a local subprocess judge adapter
 - a typed external benchmark adapter seam for benchmark metadata, verdict normalization, and run artifact identifiers
 - canonical benchmark dataset ingestion for APPS-style JSONL records
@@ -26,7 +27,9 @@ Completed milestones:
 - `BOOT-01`: package bootstrap, entrypoint, and tests
 - `API-01`: first typed callable API boundary
 - `TOP-01`: single-turn topology schema and validation
+- `TOP-02`: YAML-native topology serialization and parsing around the typed topology contract
 - `ORCH-01`: deterministic rule-based topology planning
+- `ORCH-02`: model-backed YAML orchestration boundary for frozen inference and later-turn revision
 - `EXEC-01`: deterministic single-turn topology execution
 - `JUDGE-01`: richer subprocess judge boundary with explicit test cases and soft resource limits
 - `JUDGE-02`: stricter judge normalization and typed per-case verdict reporting
@@ -46,7 +49,6 @@ Completed milestones:
 
 Not yet implemented:
 
-- topology YAML generation
 - benchmark execution beyond the current Python and JavaScript local harnesses
 - exact paper-scale checkpoint training or benchmark leaderboard reproduction
 
@@ -70,6 +72,8 @@ Key locations:
 - `docs/tech.md`: architecture and verification rules
 - `docs/tasks.md`: task cards and current task status
 - `docs/Paper.md`: implementation-oriented paper distillation
+- `use.md`: root-level usage guide for common repository workflows
+- `README_ZH.md`: Chinese overview of the current repository state
 - `src/agentconductor/domain/`: typed core contracts
 - `src/agentconductor/application/`: application services
 - `src/agentconductor/interfaces/`: public entrypoints
@@ -108,14 +112,17 @@ agentconductor: roles=6, max_turns=2
 
 ## Python API
 
-The stable package entrypoints are `solve_problem(...)`, `plan_problem_topology(...)`, and `execute_topology_plan(...)`.
+The stable package entrypoints are `solve_problem(...)`, `plan_problem_topology(...)`, `plan_problem_topology_candidate(...)`, `revise_problem_topology_candidate(...)`, `execute_topology_plan(...)`, `serialize_topology_plan_to_yaml(...)`, and `parse_topology_plan_yaml(...)`.
 
 ```python
 from agentconductor import (
     DifficultyLevel,
     ProblemInstance,
     execute_topology_plan,
+    parse_topology_plan_yaml,
     plan_problem_topology,
+    plan_problem_topology_candidate,
+    serialize_topology_plan_to_yaml,
     solve_problem,
 )
 
@@ -135,6 +142,15 @@ result = solve_problem(
     )
 )
 
+candidate = plan_problem_topology_candidate(
+    ProblemInstance(
+        identifier="apps-policy",
+        prompt="Fix the failing implementation.",
+        difficulty=DifficultyLevel.EASY,
+    ),
+    orchestrator_policy=my_policy,  # implements TopologyOrchestratorPolicy
+)
+
 execution = execute_topology_plan(
     ProblemInstance(
         identifier="apps-two-sum",
@@ -144,12 +160,18 @@ execution = execute_topology_plan(
     topology,
 )
 
+topology_yaml = serialize_topology_plan_to_yaml(topology)
+parsed_topology = parse_topology_plan_yaml(topology_yaml)
+
 print(topology.steps)
+print(topology_yaml)
+print(parsed_topology == topology)
 print(result.status)
 print(result.candidate_solution)
 print(result.testing_outcome)
 print(result.solve_state.completed_turns)
 print(execution.testing_outcome)
+print(candidate.topology_yaml)
 ```
 
 The planning API can return a typed `TopologyPlan`, and `solve_problem(...)` now returns a typed `SolveResult` that includes:
@@ -164,6 +186,13 @@ The planning API can return a typed `TopologyPlan`, and `solve_problem(...)` now
 - final testing outcome
 - a typed solve state with turn history and revision-ready feedback
 
+When no `orchestrator_policy` is passed, planning stays on deterministic
+repository-local templates. When a policy is passed, `solve_problem(...)` and
+`plan_problem_topology(...)` route through the learned YAML path, while
+`plan_problem_topology_candidate(...)` and
+`revise_problem_topology_candidate(...)` expose the raw YAML candidate plus the
+parsed `TopologyPlan`.
+
 The execution API can return a typed `TopologyExecutionResult` with:
 
 - per-step and per-agent structured outputs
@@ -171,7 +200,20 @@ The execution API can return a typed `TopologyExecutionResult` with:
 - final candidate code
 - judge outcome and diagnostics
 
+The YAML transport helpers can:
+
+- serialize a validated `TopologyPlan` into the repository's stable YAML shape
+- parse repository YAML text back into the same typed `TopologyPlan` contract
+- preserve explicit parse, schema, and logic failure boundaries
+
+The learned orchestrator path preserves explicit failure boundaries as well:
+
+- missing YAML in a policy response raises `TopologyCandidateExtractionError`
+- malformed YAML raises the existing parse-layer transport error
+- schema-invalid or logic-invalid topologies raise the existing validation errors
+
 See [API.md](/D:/code/PaperCreate/AgentConductor/API.md) for the full interface contract.
+See [use.md](/D:/code/PaperCreate/AgentConductor/use.md) for task-oriented usage examples.
 
 ## Testing
 
@@ -281,6 +323,9 @@ uv run python -m agentconductor.interfaces.rl --dataset .\artifacts\sft-dataset.
   topology metadata so later training analysis can reuse them.
 - The SFT baseline materializes schema-valid synthetic topology data and writes
   a reproducible training artifact, but it does not fine-tune a large model.
+- The synthetic `target_topology` payload now reuses the same canonical
+  `TopologyPlan.to_mapping()` transport shape that backs the YAML path, so
+  training fixtures do not maintain a separate topology serializer.
 - The RL baseline computes inspectable reward breakdowns and rollout artifacts
   using repository-local approximations of the paper's reward terms.
 - When behavior is inferred rather than stated by the paper, the repository documents that explicitly.

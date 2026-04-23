@@ -597,7 +597,7 @@ Out of scope:
 - serving fine-tuned policies in production
 
 ### Task ID: TOP-02
-Status: todo
+Status: done
 Depends on: TOP-01, ORCH-01
 Scope: add YAML-native topology serialization and parsing so the repository can exchange plans in the paper's primary representation
 Files:
@@ -618,13 +618,64 @@ Acceptance criteria:
 - invalid YAML syntax, schema violations, and logical topology violations are rejected with explicit diagnostics
 - tests cover at least one valid round-trip plus malformed, schema-invalid, and logic-invalid YAML inputs
 - caller-facing docs explain the YAML contract and how it relates to the existing typed topology API
+Suggested implementation slices:
+1. Define the YAML transport contract around the existing typed topology model.
+   Scope:
+   - choose one stable repository YAML shape for `difficulty`, `steps`, `agents`, and `refs`
+   - document which field names are repository-level inference rather than paper-stated facts
+   Deliverables:
+   - update `docs/Paper.md` and `API.md` with the YAML shape and inference notes
+   - keep `TopologyPlan` as the source of truth rather than introducing a parallel YAML-owned domain model
+2. Add typed topology serialization helpers that emit a stable mapping before YAML encoding.
+   Scope:
+   - move the current ad hoc topology-to-dict logic out of training-specific code
+   - expose one canonical `TopologyPlan -> mapping` path shared by training and later orchestrator integration
+   Deliverables:
+   - shared serialization helpers under `src/agentconductor/domain/` or a narrow adjacent seam
+   - focused tests for stable mapping output on representative plans
+3. Add an infrastructure YAML adapter for encode and decode boundaries.
+   Scope:
+   - parse YAML text into raw mappings
+   - encode canonical mappings into stable YAML text
+   - keep YAML-library details out of application services
+   Deliverables:
+   - dedicated YAML adapter module under `src/agentconductor/infrastructure/`
+   - explicit error translation for malformed YAML syntax
+4. Parse YAML through the existing typed validation path.
+   Scope:
+   - decode YAML into a mapping and then into `TopologyPlan`
+   - preserve current logical validation semantics for node budgets, prior-step refs, and final testing-agent presence
+   Deliverables:
+   - one public or internal entrypoint that returns `TopologyPlan` from YAML text
+   - explicit distinction between YAML syntax failure, schema-invalid payloads, and logic-invalid topologies
+5. Expose caller-facing topology YAML entrypoints without breaking existing typed APIs.
+   Scope:
+   - add narrow interface functions for topology YAML serialization and parsing
+   - keep `plan_problem_topology()` returning `TopologyPlan` for backward compatibility
+   Deliverables:
+   - interface-level entrypoints and package exports if justified
+   - API documentation showing how YAML transport relates to the typed topology contract
+6. Rewire existing training and future-planning prep to use the canonical topology transport helpers.
+   Scope:
+   - replace `_serialize_topology()` in the SFT path with the shared serialization contract
+   - keep JSONL dataset structure stable unless a documented YAML field is intentionally introduced
+   Deliverables:
+   - training code updated to consume the shared topology serialization path
+   - regression tests proving the SFT baseline still validates generated targets
+7. Add end-to-end verification for YAML round-trips and failure modes.
+   Scope:
+   - cover valid round-trip, malformed YAML, schema-invalid YAML, and logic-invalid YAML
+   - verify diagnostics stay explicit and behavior-based
+   Deliverables:
+   - tests under `tests/` covering both adapter and typed validation paths
+   - repository docs updated to reflect the new YAML-native contract
 Out of scope:
 - learned orchestrator generation
 - benchmark harness integration
 - checkpoint training
 
 ### Task ID: ORCH-02
-Status: todo
+Status: done
 Depends on: TOP-02, TURN-02
 Scope: add a model-backed orchestrator interface that generates topology YAML for online frozen inference
 Files:

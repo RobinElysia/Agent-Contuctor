@@ -4,9 +4,9 @@ This document describes the current stable Python API exposed by the repository 
 
 The API is still in an early milestone. It currently provides:
 
-- a typed solve entrypoint with deterministic planning and bounded multi-turn execution
+- a typed solve entrypoint with bounded multi-turn execution over explicit orchestrator modes
 - a typed multi-turn solve-state contract that records per-turn history
-- a deterministic topology-planning entrypoint
+- deterministic and learned-policy topology-planning entrypoints
 - a single-turn topology-execution entrypoint backed by a local subprocess judge adapter
 - typed topology schema objects for single-turn plans
 - validation rules for topology structure before execution
@@ -20,7 +20,11 @@ Stable callable API:
 
 - `agentconductor.solve_problem`
 - `agentconductor.plan_problem_topology`
+- `agentconductor.plan_problem_topology_candidate`
+- `agentconductor.revise_problem_topology_candidate`
 - `agentconductor.execute_topology_plan`
+- `agentconductor.serialize_topology_plan_to_yaml`
+- `agentconductor.parse_topology_plan_yaml`
 - `agentconductor.evaluate_candidate_against_benchmark`
 - `agentconductor.evaluate_candidate_against_benchmark_record`
 - `agentconductor.load_canonical_benchmark_dataset`
@@ -39,6 +43,8 @@ Stable public topology contract:
 - `agentconductor.AgentReference`
 - `agentconductor.AgentRole`
 - `agentconductor.TopologyValidationError`
+- `agentconductor.TopologySchemaError`
+- `agentconductor.TopologyLogicError`
 
 Other public types:
 
@@ -98,6 +104,12 @@ Other public types:
 - `agentconductor.SolveRequest`
 - `agentconductor.SolveResult`
 - `agentconductor.SolveStatus`
+- `agentconductor.LearnedTopologyPlan`
+- `agentconductor.OrchestratorMode`
+- `agentconductor.OrchestratorPromptRequest`
+- `agentconductor.TopologyOrchestratorPolicy`
+- `agentconductor.TopologyPromptKind`
+- `agentconductor.TopologyCandidateExtractionError`
 - `agentconductor.SftTrainingArtifact`
 - `agentconductor.SftTrainingConfig`
 - `agentconductor.SyntheticTopologySample`
@@ -116,17 +128,22 @@ Then import from Python:
 
 ```python
 from agentconductor import (
+    LearnedTopologyPlan,
+    parse_topology_plan_yaml,
     ProblemInstance,
+    TopologyOrchestratorPolicy,
     TopologyPlan,
     execute_topology_plan,
     plan_problem_topology,
+    plan_problem_topology_candidate,
+    serialize_topology_plan_to_yaml,
     solve_problem,
 )
 ```
 
 ## Solve API
 
-### `solve_problem(problem, *, max_turns=None) -> SolveResult`
+### `solve_problem(problem, *, max_turns=None, orchestrator_policy=None, orchestrator_max_attempts=1) -> SolveResult`
 
 Plan and execute a structured bounded multi-turn solve for a problem instance.
 
@@ -134,13 +151,16 @@ Parameters:
 
 - `problem: ProblemInstance`
 - `max_turns: int | None = None`
+- `orchestrator_policy: TopologyOrchestratorPolicy | None = None`
+- `orchestrator_max_attempts: int = 1`
 
 Behavior:
 
 - uses the explicit difficulty from `problem` when present
 - defaults missing difficulty to `DifficultyLevel.MEDIUM`
 - validates the turn budget against the current baseline limit
-- generates a deterministic first-turn topology
+- uses deterministic planning when no orchestrator policy is provided
+- uses the learned YAML planning path when `orchestrator_policy` is provided
 - executes plan -> evaluate in a bounded loop up to the current turn budget
 - consumes typed prior-turn testing feedback when planning a later turn
 - returns the final candidate code, role trace, and final testing outcome
@@ -162,7 +182,9 @@ Returned `SolveResult` fields:
 Implementation inference:
 
 - the medium-difficulty fallback is an engineering inference until the repository implements the paper's real difficulty inference mechanism
-- later-turn revision remains deterministic and repository-local until a learned orchestrator exists
+- deterministic planning remains the repository-local fallback when no learned policy is configured
+
+The `notes` field records which orchestrator mode produced the final topology.
 
 ## Multi-Turn Solve-State Contract
 
@@ -423,22 +445,110 @@ Current fidelity limits:
 
 ## Topology Planning API
 
-### `plan_problem_topology(problem) -> TopologyPlan`
+### `plan_problem_topology(problem, *, orchestrator_policy=None, orchestrator_max_attempts=1) -> TopologyPlan`
 
-Return a deterministic topology plan for a problem instance.
+Return a validated topology plan for a problem instance.
 
 Behavior:
 
 - uses the explicit problem difficulty when present
 - defaults missing difficulty to `DifficultyLevel.MEDIUM`
 - infers a coarse local problem shape from prompt keywords
-- selects one of a small set of topology templates
+- selects one of a small set of topology templates when no policy is provided
+- otherwise routes through the learned YAML planning boundary and validates the parsed result
 - returns a validated single-turn `TopologyPlan`
 
 Implementation inference:
 
 - prompt-shape inference is a repository-local heuristic, not a paper-defined mechanism
-- the current orchestrator is deterministic and local so it can later be replaced by a learned policy
+- deterministic planning remains the local fallback so tests and offline callers do not require a model checkpoint
+
+### `plan_problem_topology_candidate(problem, *, orchestrator_policy, orchestrator_max_attempts=1) -> LearnedTopologyPlan`
+
+Return the raw learned-policy YAML candidate plus its parsed topology.
+
+Behavior:
+
+- constructs an explicit first-turn prompt from the problem and selected difficulty
+- calls the provided policy through the narrow `TopologyOrchestratorPolicy` boundary
+- extracts one repository YAML document from the raw response
+- parses the YAML through the existing transport and topology-validation path
+- retries failed extraction or validation attempts up to `orchestrator_max_attempts`
+
+### `revise_problem_topology_candidate(revision, *, orchestrator_policy, orchestrator_max_attempts=1) -> LearnedTopologyPlan`
+
+Return the raw learned-policy revised YAML candidate plus its parsed topology.
+
+Behavior:
+
+- consumes the existing `TopologyRevisionInput` contract rather than raw strings
+- includes prior topology YAML and testing feedback in the explicit revision prompt
+- uses the same extraction, parsing, and retry path as first-turn planning
+
+## Learned Orchestrator Contract
+
+### `TopologyOrchestratorPolicy`
+
+Policies must implement:
+
+```python
+def generate_topology_candidate(
+    self,
+    *,
+    prompt: str,
+    request: OrchestratorPromptRequest,
+) -> str: ...
+```
+
+Repository-local mock policies are supported for tests and frozen-inference
+wiring when a real checkpoint is unavailable.
+
+### `LearnedTopologyPlan`
+
+```python
+LearnedTopologyPlan(
+    topology: TopologyPlan,
+    topology_yaml: str,
+    prompt: str,
+    raw_response: str,
+    attempt_count: int,
+    kind: TopologyPromptKind,
+)
+```
+
+Failure behavior:
+
+- missing extractable YAML raises `TopologyCandidateExtractionError`
+- malformed YAML raises the existing parse-layer transport error
+- schema-invalid or logic-invalid topologies raise the existing topology validation errors
+- there is no silent fallback to deterministic planning after policy failure
+
+## Topology YAML API
+
+### `serialize_topology_plan_to_yaml(topology) -> str`
+
+Serialize a validated typed topology plan into the repository YAML transport
+format.
+
+Behavior:
+
+- validates the topology before serialization
+- emits YAML from the canonical `TopologyPlan.to_mapping()` transport shape
+- keeps YAML encoding details behind the repository transport helper rather than
+  exposing the YAML library directly to callers
+
+### `parse_topology_plan_yaml(yaml_text) -> TopologyPlan`
+
+Parse repository YAML text into a validated typed topology plan.
+
+Behavior:
+
+- parses YAML text through the infrastructure adapter boundary
+- rejects malformed YAML with a parse-layer error
+- rejects schema-invalid transport payloads with `TopologySchemaError`
+- rejects graph-rule violations with `TopologyLogicError`
+- returns the same typed `TopologyPlan` contract used by the existing planning
+  and execution APIs
 
 ## Distributed Evaluation API
 
@@ -473,6 +583,13 @@ Dataset format:
 
 Generate a deterministic JSONL dataset of schema-valid topology targets derived
 from the current rule-based orchestrator.
+
+Current transport note:
+
+- `target_topology` remains JSON-serializable in the dataset artifact
+- the stored topology payload now comes from the canonical
+  `TopologyPlan.to_mapping()` transport shape rather than a training-local
+  serializer
 
 ### `run_sft_baseline_entrypoint(dataset_path, artifact_path, *, epochs=1, learning_rate=1e-4, seed=0) -> SftTrainingArtifact`
 
@@ -517,6 +634,7 @@ Current scope:
 - single-turn topology only
 - layered DAG structure
 - dependency-free parsing from plain mappings via `TopologyPlan.from_mapping(...)`
+- canonical plain-mapping serialization via `TopologyPlan.to_mapping()`
 
 Properties:
 
@@ -525,8 +643,18 @@ Properties:
 
 Methods:
 
+- `to_mapping() -> dict[str, Any]`
 - `validate() -> None`
 - `from_mapping(raw_plan: Mapping[str, Any]) -> TopologyPlan`
+
+Current transport contract:
+
+- `TopologyPlan` remains the source of truth
+- plain mappings and YAML are transport formats around the typed contract
+- the repository YAML contract uses:
+  `difficulty -> steps -> index -> agents -> name/role/refs -> step_index/agent_name`
+- these YAML field names are repository-level implementation inferences rather
+  than paper-stated schema facts
 
 ### `TopologyStep`
 
@@ -589,7 +717,7 @@ Difficulty-specific node budgets:
 
 Implementation inference:
 
-- the paper does not define a full concrete schema; `from_mapping(...)` is a repository-local parsing contract used until a YAML adapter is added
+- the paper does not define a full concrete schema; `from_mapping(...)` remains a repository-local parsing contract around the typed model and now coexists with the YAML adapter boundary
 
 ## Topology Parsing Example
 
@@ -634,23 +762,92 @@ plan = TopologyPlan.from_mapping(
 )
 ```
 
+## YAML Transport Contract
+
+The paper's primary topology representation is YAML, and the repository now
+uses a stable YAML transport around the existing typed topology model.
+
+Current repository YAML shape:
+
+```yaml
+difficulty: easy
+steps:
+  - index: 0
+    agents:
+      - name: planner_0
+        role: planning
+        refs: []
+  - index: 1
+    agents:
+      - name: coder_1
+        role: coding
+        refs:
+          - step_index: 0
+            agent_name: planner_0
+  - index: 2
+    agents:
+      - name: tester_2
+        role: testing
+        refs:
+          - step_index: 0
+            agent_name: planner_0
+          - step_index: 1
+            agent_name: coder_1
+```
+
+Error categories preserved explicitly:
+
+- YAML syntax failure:
+  the text cannot be parsed as YAML
+- schema failure:
+  the YAML parses, but required repository fields or field types are wrong
+- topology logic failure:
+  the YAML parses into the repository schema, but the resulting `TopologyPlan`
+  violates validation rules such as first-step references or missing final
+  testing agent
+
+Backward-compatibility rule:
+
+- existing typed APIs such as `plan_problem_topology(...)` will keep returning
+  `TopologyPlan`
+- YAML entrypoints are additive transport helpers, not replacements for the
+  typed topology model
+
+Current implementation status:
+
+- the repository now has an infrastructure-only YAML adapter boundary for
+  `mapping -> YAML text` and `YAML text -> mapping`
+- YAML parser failures are translated into explicit topology-YAML transport
+  errors instead of leaking raw library exceptions
+- the repository now also supports `YAML text -> TopologyPlan` through the
+  existing typed topology parser and validator
+- topology validation failures are now split into:
+  `TopologySchemaError` for field-contract violations and `TopologyLogicError`
+  for graph-rule violations, both under the existing
+  `TopologyValidationError` base class
+
 ## Current Limits
-
-The repository currently does not:
-
-- generate topology YAML from an orchestrator
 
 It currently does:
 
 - expose typed topology contracts
+- serialize typed topologies into the repository YAML transport format
+- parse repository YAML text back into validated typed topologies
+- generate topology YAML candidates through an explicit learned-orchestrator policy boundary
 - expose typed multi-turn state and revision-input contracts
 - parse single-turn topologies from plain mappings
 - validate paper-aligned topology structure
 - emit deterministic topology plans for supported difficulty tiers
 - emit deterministic revised topologies from prior-turn feedback
+- emit learned-policy topology candidates for first-turn and later-turn planning
 - execute single-turn topologies with a local judge-backed testing role
 - run a bounded multi-turn solve loop with early stop on pass
 - return candidate code and structured execution traces from `solve_problem(...)`
+
+The repository currently does not:
+
+- load a real checkpoint-backed orchestrator inside the repository by default
+- claim benchmark-exact frozen inference semantics
 
 ## Source References
 

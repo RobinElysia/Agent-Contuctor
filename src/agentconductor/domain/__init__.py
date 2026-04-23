@@ -39,11 +39,21 @@ from agentconductor.domain.history import (
     TestingFeedback,
     TopologyRevisionInput,
 )
+from agentconductor.domain.orchestration import (
+    LearnedTopologyPlan,
+    OrchestratorMode,
+    OrchestratorPromptRequest,
+    TopologyCandidateExtractionError,
+    TopologyOrchestratorPolicy,
+    TopologyPromptKind,
+)
 from agentconductor.domain.topology import (
     AgentInvocation,
     AgentReference,
     AgentRole,
+    TopologyLogicError,
     TopologyPlan,
+    TopologySchemaError,
     TopologyStep,
     TopologyValidationError,
 )
@@ -70,6 +80,9 @@ __all__ = [
     "ExecutionStatus",
     "JudgeCaseResult",
     "JudgeResourceLimits",
+    "LearnedTopologyPlan",
+    "OrchestratorMode",
+    "OrchestratorPromptRequest",
     "JudgeTestCase",
     "ResolvedAgentOutput",
     "SandboxAdapter",
@@ -82,10 +95,15 @@ __all__ = [
     "StopReason",
     "TestingOutcome",
     "TestingFeedback",
+    "TopologyCandidateExtractionError",
+    "TopologyLogicError",
+    "TopologyOrchestratorPolicy",
     "TopologyPlan",
     "TopologyExecutionError",
     "TopologyExecutionResult",
+    "TopologyPromptKind",
     "TopologyRevisionInput",
+    "TopologySchemaError",
     "TopologyStep",
     "TopologyValidationError",
 ]

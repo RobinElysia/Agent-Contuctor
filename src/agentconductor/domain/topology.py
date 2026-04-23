@@ -56,6 +56,14 @@ class TopologyValidationError(ValueError):
     """Raised when a topology plan violates schema or logical constraints."""
 
 
+class TopologySchemaError(TopologyValidationError):
+    """Raised when a topology transport payload violates the field contract."""
+
+
+class TopologyLogicError(TopologyValidationError):
+    """Raised when a parsed topology violates graph-level execution rules."""
+
+
 @dataclass(frozen=True, slots=True)
 class TopologyPlan:
     """Single-turn layered topology plan."""
@@ -71,19 +79,51 @@ class TopologyPlan:
     def max_nodes(self) -> int:
         return MAX_NODES_BY_DIFFICULTY[self.difficulty]
 
+    def to_mapping(self) -> dict[str, Any]:
+        """Serialize the topology plan into the repository transport mapping.
+
+        Inference:
+        The repository keeps ``TopologyPlan`` as the source of truth and uses a
+        stable plain-mapping representation as the canonical transport shape for
+        later YAML encoding, training artifacts, and fixture-driven tests.
+        """
+        return {
+            "difficulty": self.difficulty.value,
+            "steps": [
+                {
+                    "index": step.index,
+                    "agents": [
+                        {
+                            "name": agent.name,
+                            "role": agent.role.value,
+                            "refs": [
+                                {
+                                    "step_index": ref.step_index,
+                                    "agent_name": ref.agent_name,
+                                }
+                                for ref in agent.refs
+                            ],
+                        }
+                        for agent in step.agents
+                    ],
+                }
+                for step in self.steps
+            ],
+        }
+
     def validate(self) -> None:
         if not self.steps:
-            raise TopologyValidationError("topology plan must contain at least one step")
+            raise TopologyLogicError("topology plan must contain at least one step")
 
         expected_indices = tuple(range(len(self.steps)))
         actual_indices = tuple(step.index for step in self.steps)
         if actual_indices != expected_indices:
-            raise TopologyValidationError(
+            raise TopologyLogicError(
                 "topology steps must use contiguous zero-based indices"
             )
 
         if self.node_count > self.max_nodes:
-            raise TopologyValidationError(
+            raise TopologyLogicError(
                 f"topology plan exceeds node budget for {self.difficulty.value}: "
                 f"{self.node_count} > {self.max_nodes}"
             )
@@ -93,31 +133,31 @@ class TopologyPlan:
 
         for step in self.steps:
             if not step.agents:
-                raise TopologyValidationError(
+                raise TopologyLogicError(
                     f"topology step {step.index} must contain at least one agent"
                 )
 
             step_names: set[str] = set()
             for agent in step.agents:
                 if agent.name in step_names or agent.name in seen_names:
-                    raise TopologyValidationError(
+                    raise TopologyLogicError(
                         f"agent name '{agent.name}' must be unique across the topology plan"
                     )
                 step_names.add(agent.name)
 
                 if step.index == 0 and agent.refs:
-                    raise TopologyValidationError(
+                    raise TopologyLogicError(
                         "agents in the first step must not reference prior outputs"
                     )
 
                 for ref in agent.refs:
                     if ref.step_index >= step.index:
-                        raise TopologyValidationError(
+                        raise TopologyLogicError(
                             f"agent '{agent.name}' references step {ref.step_index}, "
                             "but references must target earlier steps only"
                         )
                     if ref.agent_name not in seen_names:
-                        raise TopologyValidationError(
+                        raise TopologyLogicError(
                             f"agent '{agent.name}' references unknown prior agent "
                             f"'{ref.agent_name}'"
                         )
@@ -130,7 +170,7 @@ class TopologyPlan:
             seen_names.update(step_names)
 
         if not final_has_testing_agent:
-            raise TopologyValidationError(
+            raise TopologyLogicError(
                 "the final step must contain a testing agent"
             )
 
@@ -145,67 +185,67 @@ class TopologyPlan:
         """
         difficulty_value = raw_plan.get("difficulty")
         if not isinstance(difficulty_value, str):
-            raise TopologyValidationError("topology plan difficulty must be a string")
+            raise TopologySchemaError("topology plan difficulty must be a string")
 
         try:
             difficulty = DifficultyLevel(difficulty_value)
         except ValueError as exc:
-            raise TopologyValidationError(
+            raise TopologySchemaError(
                 f"unsupported difficulty level '{difficulty_value}'"
             ) from exc
 
         raw_steps = raw_plan.get("steps")
         if not isinstance(raw_steps, list):
-            raise TopologyValidationError("topology plan steps must be a list")
+            raise TopologySchemaError("topology plan steps must be a list")
 
         steps: list[TopologyStep] = []
         for raw_step in raw_steps:
             if not isinstance(raw_step, Mapping):
-                raise TopologyValidationError("each topology step must be a mapping")
+                raise TopologySchemaError("each topology step must be a mapping")
 
             step_index = raw_step.get("index")
             if not isinstance(step_index, int):
-                raise TopologyValidationError("topology step index must be an integer")
+                raise TopologySchemaError("topology step index must be an integer")
 
             raw_agents = raw_step.get("agents")
             if not isinstance(raw_agents, list):
-                raise TopologyValidationError("topology step agents must be a list")
+                raise TopologySchemaError("topology step agents must be a list")
 
             agents: list[AgentInvocation] = []
             for raw_agent in raw_agents:
                 if not isinstance(raw_agent, Mapping):
-                    raise TopologyValidationError(
+                    raise TopologySchemaError(
                         "each topology agent entry must be a mapping"
                     )
 
                 name = raw_agent.get("name")
                 if not isinstance(name, str) or not name:
-                    raise TopologyValidationError(
+                    raise TopologySchemaError(
                         "topology agent name must be a non-empty string"
                     )
 
                 role_value = raw_agent.get("role")
                 if not isinstance(role_value, str):
-                    raise TopologyValidationError(
+                    raise TopologySchemaError(
                         f"agent '{name}' role must be a string"
                     )
                 try:
                     role = AgentRole(role_value)
                 except ValueError as exc:
-                    raise TopologyValidationError(
+                    raise TopologySchemaError(
                         f"agent '{name}' has unsupported role '{role_value}'"
                     ) from exc
 
                 raw_refs = raw_agent.get("refs", [])
                 if not isinstance(raw_refs, list):
-                    raise TopologyValidationError(
+                    raise TopologySchemaError(
                         f"agent '{name}' refs must be a list"
                     )
 
                 refs: list[AgentReference] = []
                 for raw_ref in raw_refs:
                     if not isinstance(raw_ref, Mapping):
-                        raise TopologyValidationError(
+                        raise TopologySchemaError(
                             f"agent '{name}' references must be mappings"
                         )
                     ref_step_index = raw_ref.get("step_index")
@@ -213,7 +253,7 @@ class TopologyPlan:
                     if not isinstance(ref_step_index, int) or not isinstance(
                         ref_agent_name, str
                     ):
-                        raise TopologyValidationError(
+                        raise TopologySchemaError(
                             f"agent '{name}' references must include integer "
                             "'step_index' and string 'agent_name'"
                         )

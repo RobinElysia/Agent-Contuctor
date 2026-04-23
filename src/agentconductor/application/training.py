@@ -41,15 +41,13 @@ def generate_sft_dataset(dataset_path: Path) -> tuple[SyntheticTopologySample, .
             problem_id=problem_id,
             prompt=prompt,
             difficulty=difficulty.value,
-            target_topology=_serialize_topology(
-                plan_topology_for_problem(
-                    ProblemInstance(
-                        identifier=problem_id,
-                        prompt=prompt,
-                        difficulty=difficulty,
-                    )
+            target_topology=plan_topology_for_problem(
+                ProblemInstance(
+                    identifier=problem_id,
+                    prompt=prompt,
+                    difficulty=difficulty,
                 )
-            ),
+            ).to_mapping(),
         )
         for difficulty, problem_id, prompt in _SYNTHETIC_PROBLEMS
     )
@@ -135,29 +133,3 @@ def run_sft_baseline_entrypoint(
             seed=seed,
         ),
     )
-
-
-def _serialize_topology(plan: TopologyPlan) -> dict:
-    return {
-        "difficulty": plan.difficulty.value,
-        "steps": [
-            {
-                "index": step.index,
-                "agents": [
-                    {
-                        "name": agent.name,
-                        "role": agent.role.value,
-                        "refs": [
-                            {
-                                "step_index": ref.step_index,
-                                "agent_name": ref.agent_name,
-                            }
-                            for ref in agent.refs
-                        ],
-                    }
-                    for agent in step.agents
-                ],
-            }
-            for step in plan.steps
-        ],
-    }

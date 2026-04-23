@@ -4,7 +4,9 @@ from pathlib import Path
 import pytest
 
 from agentconductor import (
+    DifficultyLevel,
     SftTrainingConfig,
+    TopologyPlan,
     generate_sft_dataset_entrypoint,
     run_sft_baseline_entrypoint,
 )
@@ -20,6 +22,10 @@ def test_generate_sft_dataset_and_load_schema(tmp_path: Path) -> None:
     loaded_samples = load_sft_dataset(dataset_path)
     assert len(loaded_samples) == 3
     assert loaded_samples[0].target_topology["difficulty"] == "easy"
+    assert loaded_samples[0].target_topology == TopologyPlan.from_mapping(
+        loaded_samples[0].target_topology
+    ).to_mapping()
+    assert loaded_samples[2].difficulty == DifficultyLevel.HARD.value
 
 
 def test_sft_training_config_rejects_invalid_values() -> None:

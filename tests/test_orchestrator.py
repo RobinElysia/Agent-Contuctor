@@ -1,16 +1,41 @@
 from agentconductor import (
     DifficultyLevel,
     ProblemInstance,
+    TopologyCandidateExtractionError,
+    TopologyLogicError,
     plan_problem_topology,
+    plan_problem_topology_candidate,
+    revise_problem_topology_candidate,
 )
 from agentconductor.application.orchestrator import (
     ProblemShape,
+    build_orchestrator_prompt,
+    extract_topology_yaml_candidate,
     infer_problem_shape,
     revise_topology_for_feedback,
 )
 from agentconductor.domain.execution import ExecutionStatus, TestingOutcome
 from agentconductor.domain.history import TestingFeedback, TopologyRevisionInput
+from agentconductor.domain.orchestration import OrchestratorPromptRequest, TopologyPromptKind
 from agentconductor.domain.topology import AgentRole
+import pytest
+
+
+class StubTopologyPolicy:
+    def __init__(self, responses: list[str]) -> None:
+        self._responses = responses
+        self.prompts: list[str] = []
+        self.requests: list[OrchestratorPromptRequest] = []
+
+    def generate_topology_candidate(
+        self,
+        *,
+        prompt: str,
+        request: OrchestratorPromptRequest,
+    ) -> str:
+        self.prompts.append(prompt)
+        self.requests.append(request)
+        return self._responses[len(self.prompts) - 1]
 
 
 def test_plan_problem_topology_returns_easy_template() -> None:
@@ -123,3 +148,141 @@ def test_revise_topology_for_feedback_adds_debugging_turn_for_failed_medium_prob
     assert revised.steps[2].agents[0].role is AgentRole.DEBUGGING
     assert revised.steps[3].agents[0].role is AgentRole.TESTING
     assert revised.steps[3].agents[0].refs[-1].agent_name == "debugger_t1_2"
+
+
+def test_plan_problem_topology_candidate_parses_yaml_from_policy_response() -> None:
+    policy = StubTopologyPolicy(
+        [
+            """```yaml
+difficulty: medium
+steps:
+  - index: 0
+    agents:
+      - name: planner_0
+        role: planning
+        refs: []
+  - index: 1
+    agents:
+      - name: coder_1
+        role: coding
+        refs:
+          - step_index: 0
+            agent_name: planner_0
+  - index: 2
+    agents:
+      - name: tester_2
+        role: testing
+        refs:
+          - step_index: 1
+            agent_name: coder_1
+```"""
+        ]
+    )
+
+    candidate = plan_problem_topology_candidate(
+        ProblemInstance(
+            identifier="policy-medium",
+            prompt="Implement a correct solution.",
+            difficulty=DifficultyLevel.MEDIUM,
+        ),
+        orchestrator_policy=policy,
+    )
+
+    assert candidate.kind is TopologyPromptKind.INITIAL
+    assert candidate.attempt_count == 1
+    assert candidate.topology.difficulty is DifficultyLevel.MEDIUM
+    assert candidate.topology.steps[0].agents[0].role is AgentRole.PLANNING
+    assert candidate.topology_yaml.startswith("difficulty: medium\n")
+    assert "Problem id: policy-medium" in policy.prompts[0]
+    assert policy.requests[0].kind is TopologyPromptKind.INITIAL
+
+
+def test_revise_problem_topology_candidate_retries_and_surfaces_last_validation_error() -> None:
+    problem = ProblemInstance(
+        identifier="retry-medium",
+        prompt="Fix the failing implementation.",
+        difficulty=DifficultyLevel.MEDIUM,
+    )
+    revision = TopologyRevisionInput(
+        problem=problem,
+        selected_difficulty=DifficultyLevel.MEDIUM,
+        turn_index=1,
+        prior_topology=plan_problem_topology(problem),
+        prior_execution_status=ExecutionStatus.COMPLETED,
+        testing_feedback=TestingFeedback(
+            outcome=TestingOutcome.FAILED,
+            diagnostics=("Wrong answer on sample.",),
+            candidate_code="def solve():\n    return 'wrong'\n",
+        ),
+        remaining_turns=1,
+    )
+    policy = StubTopologyPolicy(
+        [
+            "I think this should work.",
+            """difficulty: medium
+steps:
+  - index: 0
+    agents:
+      - name: planner_t1_0
+        role: planning
+        refs: []
+""",
+        ]
+    )
+
+    with pytest.raises(
+        TopologyLogicError,
+        match="final step must contain a testing agent",
+    ):
+        revise_problem_topology_candidate(
+            revision,
+            orchestrator_policy=policy,
+            orchestrator_max_attempts=2,
+        )
+
+    assert len(policy.prompts) == 2
+    assert "The previous candidate was rejected." in policy.prompts[1]
+    assert "TopologyCandidateExtractionError" in policy.prompts[1]
+    assert policy.requests[1].kind is TopologyPromptKind.REVISION
+
+
+def test_extract_topology_yaml_candidate_rejects_missing_yaml_block() -> None:
+    with pytest.raises(
+        TopologyCandidateExtractionError,
+        match="did not contain a repository topology YAML block",
+    ):
+        extract_topology_yaml_candidate("No YAML here.")
+
+
+def test_build_orchestrator_prompt_includes_prior_feedback_for_revision() -> None:
+    revision_prompt = build_orchestrator_prompt(
+        OrchestratorPromptRequest(
+            kind=TopologyPromptKind.REVISION,
+            problem=ProblemInstance(
+                identifier="prompt-check",
+                prompt="Fix the broken implementation.",
+                difficulty=DifficultyLevel.EASY,
+            ),
+            selected_difficulty=DifficultyLevel.EASY,
+            turn_index=1,
+            prior_topology=plan_problem_topology(
+                ProblemInstance(
+                    identifier="prompt-check",
+                    prompt="Fix the broken implementation.",
+                    difficulty=DifficultyLevel.EASY,
+                )
+            ),
+            testing_feedback=TestingFeedback(
+                outcome=TestingOutcome.FAILED,
+                diagnostics=("Wrong answer on edge case.",),
+                candidate_code="def solve():\n    return 0\n",
+            ),
+            remaining_turns=1,
+            last_error="TopologyLogicError: final step must contain a testing agent",
+        )
+    )
+
+    assert "Planning kind: revision" in revision_prompt
+    assert "Prior topology YAML:" in revision_prompt
+    assert "Wrong answer on edge case." in revision_prompt
+    assert "TopologyLogicError: final step must contain a testing agent" in revision_prompt

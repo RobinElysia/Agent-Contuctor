@@ -88,11 +88,21 @@ from agentconductor.domain.models import (
     SolveResult,
     SolveStatus,
 )
+from agentconductor.domain.orchestration import (
+    LearnedTopologyPlan,
+    OrchestratorMode,
+    OrchestratorPromptRequest,
+    TopologyCandidateExtractionError,
+    TopologyOrchestratorPolicy,
+    TopologyPromptKind,
+)
 from agentconductor.domain.topology import (
     AgentInvocation,
     AgentReference,
     AgentRole,
+    TopologyLogicError,
     TopologyPlan,
+    TopologySchemaError,
     TopologyStep,
     TopologyValidationError,
 )
@@ -113,7 +123,14 @@ from agentconductor.infrastructure.benchmark import (
     StubBenchmarkSubmission,
 )
 from agentconductor.infrastructure.benchmark_dataset import read_jsonl_objects
-from agentconductor.interfaces.api import plan_problem_topology, solve_problem
+from agentconductor.interfaces.api import (
+    parse_topology_plan_yaml,
+    plan_problem_topology,
+    plan_problem_topology_candidate,
+    revise_problem_topology_candidate,
+    serialize_topology_plan_to_yaml,
+    solve_problem,
+)
 from agentconductor.interfaces.benchmark import (
     evaluate_candidate_against_benchmark,
     evaluate_candidate_against_benchmark_record,
@@ -154,8 +171,11 @@ __all__ = [
     "ExecutionStatus",
     "JudgeCaseResult",
     "JudgeResourceLimits",
+    "LearnedTopologyPlan",
     "JudgeTestCase",
     "ProblemInstance",
+    "OrchestratorMode",
+    "OrchestratorPromptRequest",
     "NodeJsBenchmarkJudgeAdapter",
     "ProjectOverview",
     "PythonBenchmarkJudgeAdapter",
@@ -183,10 +203,15 @@ __all__ = [
     "SftTrainingConfig",
     "TestingOutcome",
     "TestingFeedback",
+    "TopologyCandidateExtractionError",
+    "TopologyLogicError",
+    "TopologyOrchestratorPolicy",
     "TopologyPlan",
     "TopologyExecutionError",
     "TopologyExecutionResult",
+    "TopologyPromptKind",
     "TopologyRevisionInput",
+    "TopologySchemaError",
     "TopologyStep",
     "TopologyValidationError",
     "SyntheticTopologySample",
@@ -208,13 +233,17 @@ __all__ = [
     "load_benchmark_dataset",
     "load_benchmark_dataset_entrypoint",
     "load_canonical_benchmark_dataset",
+    "parse_topology_plan_yaml",
     "plan_problem_topology",
+    "plan_problem_topology_candidate",
     "read_jsonl_objects",
+    "revise_problem_topology_candidate",
     "run_batch_evaluation",
     "run_batch_evaluation_entrypoint",
     "run_rl_baseline",
     "run_rl_baseline_entrypoint",
     "run_sft_baseline",
     "run_sft_baseline_entrypoint",
+    "serialize_topology_plan_to_yaml",
     "solve_problem",
 ]

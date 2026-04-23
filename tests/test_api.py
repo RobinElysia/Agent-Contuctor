@@ -8,16 +8,21 @@ from agentconductor import (
     AgentReference,
     DifficultyLevel,
     ExecutionStatus,
+    LearnedTopologyPlan,
     ProblemInstance,
+    TopologyLogicError,
     SolveStatus,
     StopReason,
     StepExecutionResult,
     TestingOutcome,
     TopologyExecutionResult,
     TopologyPlan,
+    parse_topology_plan_yaml,
+    serialize_topology_plan_to_yaml,
     TopologyStep,
     solve_problem,
 )
+from agentconductor.domain.orchestration import OrchestratorPromptRequest, TopologyPromptKind
 
 
 def test_solve_problem_returns_typed_boundary_result() -> None:
@@ -75,6 +80,52 @@ def test_solve_problem_rejects_invalid_turn_budget() -> None:
         solve_problem(
             ProblemInstance(identifier="bad-turns", prompt="Any prompt"),
             max_turns=3,
+        )
+
+
+def test_topology_yaml_entrypoints_round_trip_valid_topology() -> None:
+    topology = TopologyPlan(
+        difficulty=DifficultyLevel.EASY,
+        steps=(
+            TopologyStep(
+                index=0,
+                agents=(AgentInvocation(name="planner_0", role=AgentRole.PLANNING),),
+            ),
+            TopologyStep(
+                index=1,
+                agents=(
+                    AgentInvocation(
+                        name="tester_1",
+                        role=AgentRole.TESTING,
+                        refs=(AgentReference(step_index=0, agent_name="planner_0"),),
+                    ),
+                ),
+            ),
+        ),
+    )
+
+    yaml_text = serialize_topology_plan_to_yaml(topology)
+    parsed = parse_topology_plan_yaml(yaml_text)
+
+    assert yaml_text.startswith("difficulty: easy\n")
+    assert parsed == topology
+
+
+def test_parse_topology_plan_yaml_surfaces_logic_failures() -> None:
+    with pytest.raises(
+        TopologyLogicError,
+        match="final step must contain a testing agent",
+    ):
+        parse_topology_plan_yaml(
+            """
+difficulty: easy
+steps:
+  - index: 0
+    agents:
+      - name: planner_0
+        role: planning
+        refs: []
+"""
         )
 
 
@@ -287,3 +338,147 @@ def test_solve_problem_runs_second_turn_after_failure_and_stops_on_pass(
     assert result.solve_state.turns[0].testing_feedback.outcome is TestingOutcome.FAILED
     assert result.solve_state.turns[1].testing_feedback.outcome is TestingOutcome.PASSED
     assert result.candidate_solution == "def solve():\n    return 'fixed'\n"
+
+
+def test_solve_problem_can_use_learned_orchestrator_policy_for_plan_and_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    learned_requests: list[OrchestratorPromptRequest] = []
+
+    class StubPolicy:
+        def generate_topology_candidate(
+            self,
+            *,
+            prompt: str,
+            request: OrchestratorPromptRequest,
+        ) -> str:
+            del prompt
+            learned_requests.append(request)
+            if request.kind is TopologyPromptKind.INITIAL:
+                return """difficulty: easy
+steps:
+  - index: 0
+    agents:
+      - name: planner_0
+        role: planning
+        refs: []
+  - index: 1
+    agents:
+      - name: coder_1
+        role: coding
+        refs:
+          - step_index: 0
+            agent_name: planner_0
+  - index: 2
+    agents:
+      - name: tester_2
+        role: testing
+        refs:
+          - step_index: 1
+            agent_name: coder_1
+"""
+            return """difficulty: easy
+steps:
+  - index: 0
+    agents:
+      - name: planner_t1_0
+        role: planning
+        refs: []
+  - index: 1
+    agents:
+      - name: coder_t1_1
+        role: coding
+        refs:
+          - step_index: 0
+            agent_name: planner_t1_0
+  - index: 2
+    agents:
+      - name: debugger_t1_2
+        role: debugging
+        refs:
+          - step_index: 1
+            agent_name: coder_t1_1
+  - index: 3
+    agents:
+      - name: tester_t1_3
+        role: testing
+        refs:
+          - step_index: 2
+            agent_name: debugger_t1_2
+"""
+
+    def fake_execute(problem: ProblemInstance, topology: TopologyPlan) -> TopologyExecutionResult:
+        if topology.steps[-1].agents[0].name == "tester_2":
+            return TopologyExecutionResult(
+                problem=problem,
+                difficulty=DifficultyLevel.EASY,
+                status=ExecutionStatus.COMPLETED,
+                step_results=(
+                    StepExecutionResult(
+                        step_index=2,
+                        agent_results=(
+                            AgentExecutionResult(
+                                step_index=2,
+                                agent_name="tester_2",
+                                role=AgentRole.TESTING,
+                                summary="First attempt failed.",
+                                references=(),
+                                candidate_code="def solve():\n    return 'wrong'\n",
+                                diagnostics=("Wrong answer on sample.",),
+                                testing_outcome=TestingOutcome.FAILED,
+                            ),
+                        ),
+                    ),
+                ),
+                final_candidate_code="def solve():\n    return 'wrong'\n",
+                testing_outcome=TestingOutcome.FAILED,
+                diagnostics=("Wrong answer on sample.",),
+            )
+
+        return TopologyExecutionResult(
+            problem=problem,
+            difficulty=DifficultyLevel.EASY,
+            status=ExecutionStatus.COMPLETED,
+            step_results=(
+                StepExecutionResult(
+                    step_index=3,
+                    agent_results=(
+                        AgentExecutionResult(
+                            step_index=3,
+                            agent_name="tester_t1_3",
+                            role=AgentRole.TESTING,
+                            summary="Second attempt passed.",
+                            references=(),
+                            candidate_code="def solve():\n    return 'fixed'\n",
+                            diagnostics=("Accepted after revision.",),
+                            testing_outcome=TestingOutcome.PASSED,
+                        ),
+                    ),
+                ),
+            ),
+            final_candidate_code="def solve():\n    return 'fixed'\n",
+            testing_outcome=TestingOutcome.PASSED,
+            diagnostics=("Accepted after revision.",),
+        )
+
+    monkeypatch.setattr(api_module, "execute_topology", fake_execute)
+
+    result = solve_problem(
+        ProblemInstance(
+            identifier="apps-learned",
+            prompt="Fix the failing implementation.",
+            difficulty=DifficultyLevel.EASY,
+        ),
+        max_turns=2,
+        orchestrator_policy=StubPolicy(),
+        orchestrator_max_attempts=1,
+    )
+
+    assert result.status is SolveStatus.COMPLETED
+    assert result.solve_state.completed_turns == 2
+    assert result.topology.steps[-1].agents[0].name == "tester_t1_3"
+    assert result.notes[1] == "Topology planning mode: learned."
+    assert [request.kind for request in learned_requests] == [
+        TopologyPromptKind.INITIAL,
+        TopologyPromptKind.REVISION,
+    ]

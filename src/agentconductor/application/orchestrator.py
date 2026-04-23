@@ -2,16 +2,30 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from enum import StrEnum
+import re
 
 from agentconductor.domain.history import TopologyRevisionInput
+from agentconductor.domain.orchestration import (
+    LearnedTopologyPlan,
+    OrchestratorPromptRequest,
+    TopologyCandidateExtractionError,
+    TopologyOrchestratorPolicy,
+    TopologyPromptKind,
+)
 from agentconductor.domain.models import DifficultyLevel, ProblemInstance
 from agentconductor.domain.topology import (
     AgentInvocation,
     AgentReference,
     AgentRole,
+    TopologyLogicError,
     TopologyPlan,
     TopologyStep,
+)
+from agentconductor.infrastructure.topology_yaml import (
+    dump_topology_yaml_mapping,
+    parse_topology_plan_yaml,
 )
 
 
@@ -40,6 +54,10 @@ DEBUGGING_KEYWORDS = (
     "failing",
     "incorrect",
     "broken",
+)
+YAML_FENCE_PATTERN = re.compile(
+    r"```(?:yaml|yml)?\s*(.*?)```",
+    re.IGNORECASE | re.DOTALL,
 )
 
 
@@ -71,6 +89,31 @@ def plan_topology_for_problem(problem: ProblemInstance) -> TopologyPlan:
     return _medium_topology(shape)
 
 
+def plan_topology_with_policy(
+    problem: ProblemInstance,
+    *,
+    policy: TopologyOrchestratorPolicy,
+    max_attempts: int = 1,
+) -> LearnedTopologyPlan:
+    """Return a parsed topology candidate from a learned-policy boundary."""
+    difficulty = problem.difficulty or DifficultyLevel.MEDIUM
+    request = OrchestratorPromptRequest(
+        kind=TopologyPromptKind.INITIAL,
+        problem=ProblemInstance(
+            identifier=problem.identifier,
+            prompt=problem.prompt,
+            difficulty=difficulty,
+        ),
+        selected_difficulty=difficulty,
+        turn_index=0,
+    )
+    return _generate_topology_with_policy(
+        request=request,
+        policy=policy,
+        max_attempts=max_attempts,
+    )
+
+
 def revise_topology_for_feedback(revision: TopologyRevisionInput) -> TopologyPlan:
     """Return a deterministic revised topology for a failed prior turn.
 
@@ -92,6 +135,151 @@ def revise_topology_for_feedback(revision: TopologyRevisionInput) -> TopologyPla
     if revision.selected_difficulty is DifficultyLevel.HARD:
         return _hard_revision_topology(revision.turn_index, requires_retrieval)
     return _medium_revision_topology(revision.turn_index, requires_retrieval)
+
+
+def revise_topology_with_policy(
+    revision: TopologyRevisionInput,
+    *,
+    policy: TopologyOrchestratorPolicy,
+    max_attempts: int = 1,
+) -> LearnedTopologyPlan:
+    """Return a parsed revised topology candidate from a learned policy."""
+    request = OrchestratorPromptRequest(
+        kind=TopologyPromptKind.REVISION,
+        problem=revision.problem,
+        selected_difficulty=revision.selected_difficulty,
+        turn_index=revision.turn_index,
+        prior_topology=revision.prior_topology,
+        testing_feedback=revision.testing_feedback,
+        remaining_turns=revision.remaining_turns,
+    )
+    return _generate_topology_with_policy(
+        request=request,
+        policy=policy,
+        max_attempts=max_attempts,
+    )
+
+
+def build_orchestrator_prompt(request: OrchestratorPromptRequest) -> str:
+    """Build the explicit prompt sent to a learned topology policy."""
+    sections = [
+        "You are the AgentConductor orchestrator.",
+        "Return exactly one topology YAML document for the current turn.",
+        "Use the repository YAML contract:",
+        "difficulty: <easy|medium|hard>",
+        "steps:",
+        "  - index: <int>",
+        "    agents:",
+        "      - name: <string>",
+        "        role: <retrieval|planning|algorithmic|coding|debugging|testing>",
+        "        refs:",
+        "          - step_index: <int>",
+        "            agent_name: <string>",
+        "",
+        f"Planning kind: {request.kind.value}",
+        f"Problem id: {request.problem.identifier}",
+        f"Difficulty: {request.selected_difficulty.value}",
+        "Problem prompt:",
+        request.problem.prompt,
+    ]
+
+    if request.kind is TopologyPromptKind.REVISION:
+        sections.extend(
+            [
+                "",
+                f"Revision turn index: {request.turn_index}",
+                f"Remaining turns after this one: {request.remaining_turns}",
+                "Prior testing outcome:",
+                request.testing_feedback.outcome.value
+                if request.testing_feedback is not None
+                and request.testing_feedback.outcome is not None
+                else "(none)",
+                "Prior diagnostics:",
+                "\n".join(request.testing_feedback.diagnostics)
+                if request.testing_feedback and request.testing_feedback.diagnostics
+                else "(none)",
+                "Prior topology YAML:",
+                dump_topology_yaml_mapping(request.prior_topology.to_mapping())
+                if request.prior_topology is not None
+                else "(none)",
+            ]
+        )
+
+    if request.last_error:
+        sections.extend(
+            [
+                "",
+                "The previous candidate was rejected.",
+                f"Error: {request.last_error}",
+                "Repair the topology and return only corrected YAML.",
+            ]
+        )
+
+    return "\n".join(sections)
+
+
+def extract_topology_yaml_candidate(raw_response: str) -> str:
+    """Extract a YAML document from a raw policy response."""
+    stripped_response = raw_response.strip()
+    if stripped_response.startswith("difficulty:"):
+        return stripped_response
+
+    for match in YAML_FENCE_PATTERN.finditer(stripped_response):
+        candidate = match.group(1).strip()
+        if candidate:
+            return candidate
+
+    raise TopologyCandidateExtractionError(
+        "policy response did not contain a repository topology YAML block"
+    )
+
+
+def _generate_topology_with_policy(
+    *,
+    request: OrchestratorPromptRequest,
+    policy: TopologyOrchestratorPolicy,
+    max_attempts: int,
+) -> LearnedTopologyPlan:
+    if max_attempts < 1:
+        raise ValueError("max_attempts must be at least 1")
+
+    last_error: Exception | None = None
+    for attempt_count in range(1, max_attempts + 1):
+        attempted_request = replace(
+            request,
+            last_error=None
+            if last_error is None
+            else f"{type(last_error).__name__}: {last_error}",
+        )
+        prompt = build_orchestrator_prompt(attempted_request)
+        raw_response = policy.generate_topology_candidate(
+            prompt=prompt,
+            request=attempted_request,
+        )
+        try:
+            topology_yaml = extract_topology_yaml_candidate(raw_response)
+            topology = parse_topology_plan_yaml(topology_yaml)
+            if topology.difficulty is not request.selected_difficulty:
+                raise TopologyLogicError(
+                    "learned orchestrator returned topology difficulty "
+                    f"'{topology.difficulty.value}' but expected "
+                    f"'{request.selected_difficulty.value}'"
+                )
+        except (TopologyCandidateExtractionError, ValueError) as exc:
+            last_error = exc
+            continue
+
+        return LearnedTopologyPlan(
+            topology=topology,
+            topology_yaml=topology_yaml,
+            prompt=prompt,
+            raw_response=raw_response,
+            attempt_count=attempt_count,
+            kind=request.kind,
+        )
+
+    assert last_error is not None
+    raise last_error
 
 
 def _easy_topology() -> TopologyPlan:

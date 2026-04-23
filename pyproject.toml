@@ -17,7 +17,9 @@ keywords = [
   "topology",
   "research-reproduction",
 ]
-dependencies = []
+dependencies = [
+  "PyYAML>=6.0.2",
+]
 
 [project.scripts]
 agentconductor = "agentconductor.interfaces.cli:main"

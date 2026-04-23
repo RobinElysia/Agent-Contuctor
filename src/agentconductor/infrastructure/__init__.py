@@ -12,6 +12,14 @@ from agentconductor.infrastructure.sandbox import (
     PythonSubprocessJudgeAdapter,
     PythonSubprocessSandboxAdapter,
 )
+from agentconductor.infrastructure.topology_yaml import (
+    TopologyYamlError,
+    TopologyYamlParseError,
+    TopologyYamlSchemaError,
+    dump_topology_yaml_mapping,
+    load_topology_yaml_mapping,
+    parse_topology_plan_yaml,
+)
 
 __all__ = [
     "PythonSubprocessJudgeAdapter",
@@ -22,4 +30,10 @@ __all__ = [
     "read_jsonl_objects",
     "StubBenchmarkAdapter",
     "StubBenchmarkSubmission",
+    "TopologyYamlError",
+    "TopologyYamlParseError",
+    "TopologyYamlSchemaError",
+    "dump_topology_yaml_mapping",
+    "load_topology_yaml_mapping",
+    "parse_topology_plan_yaml",
 ]
