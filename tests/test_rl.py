@@ -23,6 +23,7 @@ from agentconductor import (
     run_sft_baseline_entrypoint,
 )
 from agentconductor.domain.models import ProblemInstance
+from types import SimpleNamespace
 
 
 def test_compute_reward_breakdown_prefers_valid_passing_topology() -> None:
@@ -62,6 +63,8 @@ def test_rl_training_config_rejects_invalid_values() -> None:
         RlTrainingConfig(rollout_count=3, group_size=2)
     with pytest.raises(ValueError, match="optimizer_learning_rate"):
         RlTrainingConfig(optimizer_learning_rate=0)
+    with pytest.raises(ValueError, match="advantage_epsilon"):
+        RlTrainingConfig(advantage_epsilon=0)
 
 
 def test_run_rl_baseline_entrypoint_writes_updated_checkpoint_artifact(
@@ -140,6 +143,7 @@ def test_run_rl_baseline_entrypoint_writes_updated_checkpoint_artifact(
                 self.topology = topology
                 self.testing_outcome = TestingOutcome.PASSED
                 self.execution = execution
+                self.solve_state = SimpleNamespace(turns=(object(),))
 
         return StubSolveResult()
 
@@ -157,17 +161,25 @@ def test_run_rl_baseline_entrypoint_writes_updated_checkpoint_artifact(
 
     assert artifact.rollout_count == 4
     assert artifact.group_size == 2
+    assert Path(artifact.grouped_update_path).exists()
+    assert artifact.advantage_estimator == "group-normalized-grpo"
     payload = json.loads(rl_artifact_path.read_text(encoding="utf-8"))
     assert len(payload["rollout_records"]) == 4
+    assert len(payload["group_summaries"]) == 2
+    assert len(payload["advantage_records"]) == 4
     assert payload["rollout_records"][0]["execution_outcome"] == "passed"
+    assert payload["rollout_records"][0]["turn_count"] == 1
     assert payload["rollout_records"][0]["resulting_checkpoint_id"] == artifact.checkpoint_id
-    assert payload["policy_update"]["optimizer_name"] == "grpo-stub"
+    assert payload["policy_update"]["optimizer_name"] == "grpo-paper-oriented"
+    assert payload["policy_update"]["group_count"] == 2
+    assert payload["policy_update"]["advantage_estimator"] == "group-normalized-grpo"
 
     updated_checkpoint = load_sft_checkpoint_entrypoint(artifact.checkpoint_path)
     assert updated_checkpoint.training_stage == "rl"
     assert updated_checkpoint.parent_checkpoint_id == sft_artifact.checkpoint_id
     assert updated_checkpoint.average_reward == artifact.average_reward
-    assert updated_checkpoint.optimizer_name == "grpo-stub"
+    assert updated_checkpoint.optimizer_name == "grpo-paper-oriented"
+    assert updated_checkpoint.scale_label == "rl-reduced-scale-approximate"
     assert updated_checkpoint.runtime_artifact_path is not None
     assert Path(updated_checkpoint.runtime_artifact_path).exists()
     assert Path(artifact.rollout_manifest_path).exists()

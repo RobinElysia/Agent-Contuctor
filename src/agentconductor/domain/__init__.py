@@ -76,7 +76,9 @@ from agentconductor.domain.topology import (
 )
 from agentconductor.domain.rl import (
     RewardBreakdown,
+    RlAdvantageRecord,
     RlPolicyUpdateSummary,
+    RlRolloutGroupSummary,
     RlRolloutRecord,
     RlTrainingArtifact,
     RlTrainingConfig,
@@ -134,7 +136,9 @@ __all__ = [
     "JudgeTestCase",
     "RewardBreakdown",
     "ResolvedAgentOutput",
+    "RlAdvantageRecord",
     "RlPolicyUpdateSummary",
+    "RlRolloutGroupSummary",
     "RlRolloutRecord",
     "RlTrainingArtifact",
     "RlTrainingConfig",

@@ -1143,7 +1143,7 @@ Out of scope:
 - production distributed training orchestration
 
 ### Task ID: RL-03
-Status: todo
+Status: done
 Depends on: TRAIN-03, ORCH-04
 Scope: replace the current GRPO-shaped stub with a paper-aligned RL optimization path over topology-generation rollouts
 Files:

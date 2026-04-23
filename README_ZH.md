@@ -26,6 +26,7 @@ AgentConductor 是一个面向后端的 Python 项目，目标是把论文 `2602
 - `ORCH-04`：从 checkpoint runtime bundle 加载 frozen orchestrator
 - `EXEC-02`：非 `testing` worker 改为显式 model-backed runtime
 - `TRAIN-03`：paper-oriented synthetic YAML-topology SFT corpus 扩展，默认支持 4,500 样本 dataset preparation，并记录 dataset sidecar metadata、optimizer/tokenizer/backbone provenance 与 reduced-scale 标记
+- `RL-03`：paper-oriented grouped-rollout RL 路径，增加 group-normalized advantage、grouped update artifact，以及写入 checkpoint runtime lineage 的更新信息
 - `RL-02`：checkpoint lineage 与 grouped rollout artifact
 - `EVAL-02`：checkpoint-backed benchmark-aligned evaluation
 

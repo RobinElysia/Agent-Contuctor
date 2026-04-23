@@ -771,7 +771,7 @@ Implementation inference:
 Compute a repository-local reward breakdown from YAML validity, execution
 outcome, and topology-density signals.
 
-### `run_rl_baseline_entrypoint(dataset_path, artifact_path, *, checkpoint_source, rollout_count=4, group_size=2, turn_budget=2, seed=0, optimizer_learning_rate=1e-5, optimizer_name="grpo-stub", checkpoint_device="cpu") -> RlTrainingArtifact`
+### `run_rl_baseline_entrypoint(dataset_path, artifact_path, *, checkpoint_source, rollout_count=8, group_size=8, turn_budget=2, seed=0, optimizer_learning_rate=1e-5, optimizer_name="grpo-paper-oriented", checkpoint_device="cpu") -> RlTrainingArtifact`
 
 Run the repository-local RL training path from one source checkpoint and write
 rollout artifacts plus an updated checkpoint.
@@ -782,23 +782,19 @@ Behavior:
   training artifact JSON
 - collects rollout records through the current bounded solve loop
 - preserves per-rollout execution outcomes, YAML-derived topology artifacts,
-  reward breakdowns, and the resulting checkpoint identifier
-- computes grouped advantages as a lightweight GRPO-style update summary
+  turn counts, reward breakdowns, and the resulting checkpoint identifier
+- computes group-normalized advantages plus grouped rollout summaries as a
+  paper-oriented GRPO-style update stage
 - writes a new checkpoint directory with updated metadata, copied runtime
   bundle state when available, and a stubbed weight lineage marker
-- returns a typed artifact that points to both the rollout manifest and the
-  updated checkpoint
+- returns a typed artifact that points to the rollout manifest, grouped-update
+  artifact, and updated checkpoint
 
 Implementation inference:
 
-- this path is shaped like the paper's RL stage, but it still uses a
-  repository-local grouped-reward stub updater instead of claiming full GRPO
-  optimizer fidelity
-
-Implementation inference:
-
-- this baseline reproduces the reward structure in a local, inspectable form
-  but does not claim to implement full GRPO optimization
+- this path now reproduces grouped rollout collection and normalized-advantage
+  bookkeeping more explicitly, but it still does not claim full paper-scale
+  GRPO optimizer fidelity or distributed training behavior
 
 ## Topology Schema
 

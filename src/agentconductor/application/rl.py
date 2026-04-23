@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict
 from pathlib import Path
 from shutil import copyfile
@@ -12,7 +13,9 @@ from agentconductor.domain.execution import TestingOutcome
 from agentconductor.domain.models import DifficultyLevel, ProblemInstance
 from agentconductor.domain.rl import (
     RewardBreakdown,
+    RlAdvantageRecord,
     RlPolicyUpdateSummary,
+    RlRolloutGroupSummary,
     RlRolloutRecord,
     RlTrainingArtifact,
     RlTrainingConfig,
@@ -106,6 +109,7 @@ def collect_rl_rollouts(
                 topology_node_count=rollout_topology.node_count,
                 topology_yaml=rollout_topology_yaml,
                 execution_outcome=outcome.value,
+                turn_count=len(result.solve_state.turns),
                 reward_breakdown=compute_reward_breakdown(
                     topology=rollout_topology,
                     yaml_valid=True,
@@ -118,32 +122,81 @@ def collect_rl_rollouts(
 
 def summarize_policy_update(
     *,
-    rollouts: tuple[RlRolloutRecord, ...],
+    group_summaries: tuple[RlRolloutGroupSummary, ...],
+    advantages: tuple[RlAdvantageRecord, ...],
     config: RlTrainingConfig,
     source_checkpoint_id: str,
     resulting_checkpoint_id: str,
 ) -> RlPolicyUpdateSummary:
-    """Summarize one lightweight GRPO-style policy update from grouped rewards."""
-    grouped_advantages: list[float] = []
-    for group_start in range(0, len(rollouts), config.group_size):
-        group = rollouts[group_start : group_start + config.group_size]
-        group_reward = sum(item.reward_breakdown.total_reward for item in group) / len(group)
-        for item in group:
-            grouped_advantages.append(item.reward_breakdown.total_reward - group_reward)
-
-    average_reward = sum(item.reward_breakdown.total_reward for item in rollouts) / len(rollouts)
-    average_advantage = sum(grouped_advantages) / len(grouped_advantages)
+    """Summarize one paper-oriented GRPO-style policy update from grouped rewards."""
+    average_reward = sum(item.total_reward for item in advantages) / len(advantages)
+    average_advantage = sum(item.normalized_advantage for item in advantages) / len(advantages)
+    average_group_reward = sum(item.mean_reward for item in group_summaries) / len(group_summaries)
+    max_abs_advantage = max(abs(item.normalized_advantage) for item in advantages)
+    applied_update_scale = (
+        config.optimizer_learning_rate
+        * sum(abs(item.normalized_advantage) for item in advantages)
+        / len(advantages)
+    )
     return RlPolicyUpdateSummary(
         optimizer_name=config.optimizer_name,
         source_checkpoint_id=source_checkpoint_id,
         resulting_checkpoint_id=resulting_checkpoint_id,
-        rollout_count=len(rollouts),
+        rollout_count=len(advantages),
         group_size=config.group_size,
+        group_count=len(group_summaries),
+        turn_budget=config.turn_budget,
+        advantage_estimator="group-normalized-grpo",
+        normalization_epsilon=config.advantage_epsilon,
         average_reward=average_reward,
         average_advantage=average_advantage,
-        applied_update_scale=config.optimizer_learning_rate * average_reward,
-        optimizer_steps=len(rollouts) // config.group_size,
+        average_group_reward=average_group_reward,
+        max_abs_advantage=max_abs_advantage,
+        applied_update_scale=applied_update_scale,
+        optimizer_steps=len(group_summaries),
     )
+
+
+def compute_grouped_advantages(
+    *,
+    rollouts: tuple[RlRolloutRecord, ...],
+    config: RlTrainingConfig,
+) -> tuple[tuple[RlRolloutGroupSummary, ...], tuple[RlAdvantageRecord, ...]]:
+    """Compute group-normalized advantages over rollout rewards."""
+    group_summaries: list[RlRolloutGroupSummary] = []
+    advantages: list[RlAdvantageRecord] = []
+    for group_start in range(0, len(rollouts), config.group_size):
+        group = rollouts[group_start : group_start + config.group_size]
+        rewards = [item.reward_breakdown.total_reward for item in group]
+        mean_reward = sum(rewards) / len(rewards)
+        variance = sum((reward - mean_reward) ** 2 for reward in rewards) / len(rewards)
+        reward_stddev = math.sqrt(variance)
+        group_index = group[0].group_index
+        group_summaries.append(
+            RlRolloutGroupSummary(
+                group_index=group_index,
+                rollout_indices=tuple(item.rollout_index for item in group),
+                mean_reward=mean_reward,
+                reward_stddev=reward_stddev,
+                min_reward=min(rewards),
+                max_reward=max(rewards),
+            )
+        )
+        denominator = reward_stddev + config.advantage_epsilon
+        for item in group:
+            advantages.append(
+                RlAdvantageRecord(
+                    rollout_index=item.rollout_index,
+                    group_index=group_index,
+                    total_reward=item.reward_breakdown.total_reward,
+                    group_mean_reward=mean_reward,
+                    group_reward_stddev=reward_stddev,
+                    normalized_advantage=(
+                        (item.reward_breakdown.total_reward - mean_reward) / denominator
+                    ),
+                )
+            )
+    return tuple(group_summaries), tuple(advantages)
 
 
 def write_rl_checkpoint(
@@ -179,7 +232,11 @@ def write_rl_checkpoint(
     if source_checkpoint.runtime_artifact_path is not None:
         source_runtime_artifact = Path(source_checkpoint.runtime_artifact_path)
         if source_runtime_artifact.exists():
-            copyfile(source_runtime_artifact, runtime_artifact_path)
+            _write_updated_runtime_artifact(
+                source_runtime_artifact=source_runtime_artifact,
+                target_runtime_artifact=runtime_artifact_path,
+                update_summary=update_summary,
+            )
 
     metadata = OrchestratorCheckpointMetadata(
         checkpoint_id=update_summary.resulting_checkpoint_id,
@@ -195,6 +252,11 @@ def write_rl_checkpoint(
         epochs=source_checkpoint.epochs,
         learning_rate=update_summary.applied_update_scale,
         seed=source_checkpoint.seed,
+        source_dataset_metadata_path=source_checkpoint.source_dataset_metadata_path,
+        source_recipe_name=source_checkpoint.source_recipe_name,
+        paper_target_sample_count=source_checkpoint.paper_target_sample_count,
+        uses_reduced_paper_subset=source_checkpoint.uses_reduced_paper_subset,
+        scale_label="rl-reduced-scale-approximate",
         training_stage="rl",
         parent_checkpoint_id=source_checkpoint.checkpoint_id,
         optimizer_name=update_summary.optimizer_name,
@@ -232,14 +294,26 @@ def run_rl_baseline(
         config=active_config,
         resulting_checkpoint_id=resulting_checkpoint_id,
     )
-    update_summary = summarize_policy_update(
+    group_summaries, advantages = compute_grouped_advantages(
         rollouts=rollouts,
+        config=active_config,
+    )
+    update_summary = summarize_policy_update(
+        group_summaries=group_summaries,
+        advantages=advantages,
         config=active_config,
         source_checkpoint_id=source_checkpoint.checkpoint_id,
         resulting_checkpoint_id=resulting_checkpoint_id,
     )
     rollout_manifest_path = artifact_path.with_name(f"{artifact_path.stem}.rollouts.jsonl")
+    grouped_update_path = artifact_path.with_name(f"{artifact_path.stem}.grouped-update.json")
     _write_rollout_manifest(rollouts=rollouts, manifest_path=rollout_manifest_path)
+    _write_grouped_update_artifact(
+        group_summaries=group_summaries,
+        advantages=advantages,
+        update_summary=update_summary,
+        artifact_path=grouped_update_path,
+    )
     updated_checkpoint = write_rl_checkpoint(
         artifact_path=artifact_path,
         dataset_path=dataset_path,
@@ -252,6 +326,7 @@ def run_rl_baseline(
         source_checkpoint_id=source_checkpoint.checkpoint_id,
         source_checkpoint_path=source_checkpoint.checkpoint_path,
         rollout_manifest_path=str(rollout_manifest_path),
+        grouped_update_path=str(grouped_update_path),
         checkpoint_id=updated_checkpoint.checkpoint_id,
         checkpoint_path=updated_checkpoint.checkpoint_path,
         checkpoint_metadata_path=updated_checkpoint.metadata_path,
@@ -260,6 +335,7 @@ def run_rl_baseline(
         turn_budget=active_config.turn_budget,
         optimizer_name=active_config.optimizer_name,
         optimizer_learning_rate=active_config.optimizer_learning_rate,
+        advantage_estimator=update_summary.advantage_estimator,
         average_reward=update_summary.average_reward,
         average_advantage=update_summary.average_advantage,
         seed=active_config.seed,
@@ -270,6 +346,8 @@ def run_rl_baseline(
             {
                 "artifact": asdict(artifact),
                 "rollout_records": [asdict(rollout) for rollout in rollouts],
+                "group_summaries": [asdict(summary) for summary in group_summaries],
+                "advantage_records": [asdict(advantage) for advantage in advantages],
                 "policy_update": asdict(update_summary),
             },
             indent=2,
@@ -285,11 +363,11 @@ def run_rl_baseline_entrypoint(
     *,
     checkpoint_source: str | Path,
     rollout_count: int = 4,
-    group_size: int = 2,
+    group_size: int = 8,
     turn_budget: int = 2,
     seed: int = 0,
     optimizer_learning_rate: float = 1e-5,
-    optimizer_name: str = "grpo-stub",
+    optimizer_name: str = "grpo-paper-oriented",
     checkpoint_device: str = "cpu",
 ) -> RlTrainingArtifact:
     """Public wrapper that normalizes RL checkpoint-optimization config values."""
@@ -333,3 +411,49 @@ def _write_rollout_manifest(
         "".join(json.dumps(asdict(rollout)) + "\n" for rollout in rollouts),
         encoding="utf-8",
     )
+
+
+def _write_grouped_update_artifact(
+    *,
+    group_summaries: tuple[RlRolloutGroupSummary, ...],
+    advantages: tuple[RlAdvantageRecord, ...],
+    update_summary: RlPolicyUpdateSummary,
+    artifact_path: Path,
+) -> None:
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text(
+        json.dumps(
+            {
+                "group_summaries": [asdict(summary) for summary in group_summaries],
+                "advantage_records": [asdict(advantage) for advantage in advantages],
+                "policy_update": asdict(update_summary),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _write_updated_runtime_artifact(
+    *,
+    source_runtime_artifact: Path,
+    target_runtime_artifact: Path,
+    update_summary: RlPolicyUpdateSummary,
+) -> None:
+    payload = json.loads(source_runtime_artifact.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        copyfile(source_runtime_artifact, target_runtime_artifact)
+        return
+    payload["last_rl_update"] = {
+        "optimizer_name": update_summary.optimizer_name,
+        "source_checkpoint_id": update_summary.source_checkpoint_id,
+        "resulting_checkpoint_id": update_summary.resulting_checkpoint_id,
+        "rollout_count": update_summary.rollout_count,
+        "group_size": update_summary.group_size,
+        "group_count": update_summary.group_count,
+        "turn_budget": update_summary.turn_budget,
+        "average_reward": update_summary.average_reward,
+        "average_group_reward": update_summary.average_group_reward,
+        "applied_update_scale": update_summary.applied_update_scale,
+    }
+    target_runtime_artifact.write_text(json.dumps(payload, indent=2), encoding="utf-8")

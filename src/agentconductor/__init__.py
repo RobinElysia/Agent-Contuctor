@@ -80,7 +80,9 @@ from agentconductor.domain.reproduction import (
 )
 from agentconductor.domain.rl import (
     RewardBreakdown,
+    RlAdvantageRecord,
     RlPolicyUpdateSummary,
+    RlRolloutGroupSummary,
     RlRolloutRecord,
     RlTrainingArtifact,
     RlTrainingConfig,
@@ -260,7 +262,9 @@ __all__ = [
     "PythonSubprocessSandboxAdapter",
     "RewardBreakdown",
     "ResolvedAgentOutput",
+    "RlAdvantageRecord",
     "RlPolicyUpdateSummary",
+    "RlRolloutGroupSummary",
     "RlRolloutRecord",
     "RlTrainingArtifact",
     "RlTrainingConfig",

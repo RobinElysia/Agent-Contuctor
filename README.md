@@ -56,6 +56,7 @@ Completed milestones:
 - `EXEC-02`: model-backed non-testing worker runtime seam with per-agent runtime or model provenance
 - `RL-01`: repository-local reward breakdown and RL-style rollout artifact generation
 - `RL-02`: checkpoint-updating RL path with grouped rollout artifacts, lightweight GRPO-style update summaries, and loadable updated checkpoint metadata
+- `RL-03`: paper-oriented grouped-rollout RL path with group-normalized advantages, grouped update artifacts, and RL lineage written into checkpoint runtime provenance
 - `EVAL-02`: benchmark-aligned frozen-inference evaluation with structured per-attempt artifacts, dataset or harness provenance, and pass@1 or pass@k aggregates
 - `BENCH-01`: typed external benchmark adapter seam for execution metadata and verdict mapping
 - `BENCH-02`: canonical benchmark dataset ingestion and normalization for APPS-style JSONL artifacts
@@ -338,7 +339,7 @@ result = solve_problem(
 Run the repository-local RL checkpoint-optimization path over that dataset:
 
 ```powershell
-uv run python -m agentconductor.interfaces.rl --dataset .\artifacts\sft-dataset.jsonl --artifact .\artifacts\rl-run.json --checkpoint .\artifacts\sft-run.json --rollout-count 4 --group-size 2
+uv run python -m agentconductor.interfaces.rl --dataset .\artifacts\sft-dataset.jsonl --artifact .\artifacts\rl-run.json --checkpoint .\artifacts\sft-run.json --rollout-count 8 --group-size 8
 ```
 
 ## Design Notes
@@ -438,11 +439,13 @@ uv run python -m agentconductor.interfaces.rl --dataset .\artifacts\sft-dataset.
   `device="cpu"` only and keeps explicit checks for runtime-artifact presence,
   prompt-template compatibility, and supported-device selection.
 - The RL path now consumes an explicit source checkpoint, collects rollout
-  records through the bounded solve loop, computes grouped advantages, and
-  writes an updated checkpoint plus rollout manifest artifacts.
-- The current RL optimizer is still a repository-local GRPO-shaped stub. It
-  makes rollout rewards, checkpoint lineage, and update scale explicit, but it
-  does not claim paper-scale distributed training fidelity.
+  records through the bounded solve loop, computes group-normalized advantages,
+  writes a dedicated grouped-update artifact, and materializes an updated
+  checkpoint plus rollout manifest artifacts.
+- The current RL path now matches the paper more closely on explicit group-size
+  configuration, grouped rollout semantics, and separated reward or advantage
+  stages. It still remains a repository-local reduced-scale approximation
+  rather than a paper-scale distributed GRPO implementation.
 - The repository now also exposes a vendor-native benchmark runtime boundary
   with typed submission receipt, poll history, terminal verdict mapping, and
   artifact provenance. The current verification path is fixture-driven rather
