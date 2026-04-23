@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -20,6 +21,7 @@ from agentconductor.domain.benchmark import (
     BenchmarkExecutionSettings,
     BenchmarkInvocationMode,
     BenchmarkPhaseArtifactIdentifiers,
+    BenchmarkPhaseExecutionSettings,
     BenchmarkPhaseResult,
     BenchmarkPhaseStatus,
     BenchmarkProblemDefinition,
@@ -612,6 +614,255 @@ class NodeJsBenchmarkJudgeAdapter(BenchmarkAdapter):
             )
 
 
+def _evaluate_compiled_benchmark_candidate(
+    *,
+    problem: BenchmarkProblemDefinition,
+    candidate: CodeCandidate,
+    settings: BenchmarkExecutionSettings,
+    test_cases: tuple[BenchmarkTestCase, ...],
+    language: str,
+    adapter_name: str,
+    artifact_root: Path | None,
+    compiler_command: str,
+    compiler_label: str,
+    source_filename: str,
+    executable_filename: str,
+    runtime_command: str | None,
+    runtime_label: str,
+    function_invocation_supported: bool,
+) -> BenchmarkEvaluationResult:
+    normalized_language = _normalize_benchmark_language(language)
+    if _normalize_benchmark_language(settings.language) != normalized_language:
+        return BenchmarkEvaluationResult(
+            adapter_name=adapter_name,
+            status=BenchmarkEvaluationStatus.ADAPTER_ERROR,
+            problem=problem,
+            diagnostics=(
+                f"{adapter_name} only supports settings.language='{normalized_language}', received '{settings.language}'.",
+            ),
+        )
+    if _normalize_benchmark_language(candidate.language) != normalized_language:
+        return BenchmarkEvaluationResult(
+            adapter_name=adapter_name,
+            status=BenchmarkEvaluationStatus.ADAPTER_ERROR,
+            problem=problem,
+            diagnostics=(
+                f"{adapter_name} only supports candidate.language='{normalized_language}', received '{candidate.language}'.",
+            ),
+        )
+    if not test_cases:
+        return BenchmarkEvaluationResult(
+            adapter_name=adapter_name,
+            status=BenchmarkEvaluationStatus.ADAPTER_ERROR,
+            problem=problem,
+            diagnostics=(
+                "Benchmark execution requires at least one benchmark-owned test case; the canonical dataset record only contained metadata.",
+            ),
+        )
+    if settings.invocation_mode is BenchmarkInvocationMode.FUNCTION and not function_invocation_supported:
+        return BenchmarkEvaluationResult(
+            adapter_name=adapter_name,
+            status=BenchmarkEvaluationStatus.ADAPTER_ERROR,
+            problem=problem,
+            diagnostics=(
+                f"{adapter_name} currently supports stdin-style benchmark records only; function invocation is still unsupported for language '{normalized_language}'.",
+            ),
+        )
+
+    resolved_compiler = shutil.which(compiler_command)
+    if resolved_compiler is None:
+        return BenchmarkEvaluationResult(
+            adapter_name=adapter_name,
+            status=BenchmarkEvaluationStatus.ADAPTER_ERROR,
+            problem=problem,
+            diagnostics=(f"{compiler_label} '{compiler_command}' was not available on PATH.",),
+        )
+    resolved_runtime = None
+    if runtime_command is not None:
+        resolved_runtime = shutil.which(runtime_command)
+        if resolved_runtime is None:
+            return BenchmarkEvaluationResult(
+                adapter_name=adapter_name,
+                status=BenchmarkEvaluationStatus.ADAPTER_ERROR,
+                problem=problem,
+                diagnostics=(f"{runtime_label} '{runtime_command}' was not available on PATH.",),
+            )
+
+    compile_phase = settings.compile_phase or _default_compiled_compile_phase_settings(
+        language=normalized_language,
+        compiler_command=resolved_compiler,
+        source_filename=source_filename,
+        executable_filename=executable_filename,
+    )
+    run_phase = settings.run_phase or _default_compiled_run_phase_settings(
+        language=normalized_language,
+        runtime_command=resolved_runtime,
+        executable_filename=executable_filename,
+    )
+
+    with tempfile.TemporaryDirectory(prefix=f"agentconductor-{normalized_language}-benchmark-") as temp_dir:
+        sandbox_root = Path(temp_dir)
+        source_path = sandbox_root / (
+            compile_phase.source_layout[0] if compile_phase.source_layout else source_filename
+        )
+        source_path.parent.mkdir(parents=True, exist_ok=True)
+        source_path.write_text(candidate.source_code, encoding="utf-8")
+        executable_target = (
+            run_phase.executable_target
+            or compile_phase.executable_target
+            or executable_filename
+        )
+        executable_path = sandbox_root / executable_target
+        compile_command = _materialize_phase_command(
+            phase_command=compile_phase.command,
+            compiler_command=resolved_compiler,
+            runtime_command=resolved_runtime,
+            source_path=source_path,
+            executable_path=executable_path,
+        )
+        compile_timeout_seconds = _phase_timeout_seconds(compile_phase, settings)
+        compile_completed = _run_command(
+            command=compile_command,
+            cwd=sandbox_root,
+            timeout_seconds=compile_timeout_seconds,
+        )
+        compile_result = _build_compiled_compile_phase_result(
+            phase_settings=compile_phase,
+            completed=compile_completed,
+            compiler_label=compiler_label,
+            timeout_seconds=compile_timeout_seconds,
+        )
+        if compile_result.status is BenchmarkPhaseStatus.FAILED:
+            sandbox_result = SandboxExecutionResult(
+                outcome=compile_result.repository_outcome or TestingOutcome.COMPILATION_ERROR,
+                diagnostics=compile_result.diagnostics,
+                case_results=(),
+                stdout=compile_completed.stdout,
+                stderr=compile_completed.stderr,
+                exit_code=compile_completed.returncode,
+            )
+            return _build_compiled_benchmark_result(
+                adapter_name=adapter_name,
+                artifact_root=artifact_root,
+                problem=problem,
+                candidate=candidate,
+                settings=settings,
+                sandbox_result=sandbox_result,
+                phase_results=(compile_result,),
+            )
+
+        runtime_command_tokens = _materialize_phase_command(
+            phase_command=run_phase.command,
+            compiler_command=resolved_compiler,
+            runtime_command=resolved_runtime,
+            source_path=source_path,
+            executable_path=executable_path,
+        )
+        run_result, sandbox_result = _run_compiled_benchmark_cases(
+            run_phase=run_phase,
+            settings=settings,
+            test_cases=test_cases,
+            command=runtime_command_tokens,
+            cwd=sandbox_root,
+            invocation_diagnostic=(
+                f"STDIN benchmark execution ran the compiled {normalized_language} candidate through a local compile-then-run harness."
+            ),
+        )
+        return _build_compiled_benchmark_result(
+            adapter_name=adapter_name,
+            artifact_root=artifact_root,
+            problem=problem,
+            candidate=candidate,
+            settings=settings,
+            sandbox_result=sandbox_result,
+            phase_results=(compile_result, run_result),
+        )
+
+
+class CppBenchmarkJudgeAdapter(BenchmarkAdapter):
+    """Concrete local benchmark path for compiled C++ stdin-style records."""
+
+    def __init__(
+        self,
+        *,
+        compiler_command: str = "g++",
+        artifact_root: Path | None = None,
+        adapter_name: str = "cpp-benchmark-harness",
+    ) -> None:
+        if not adapter_name:
+            raise ValueError("adapter_name must be a non-empty string")
+        self._compiler_command = compiler_command
+        self._artifact_root = artifact_root
+        self._adapter_name = adapter_name
+
+    def evaluate(
+        self,
+        problem: BenchmarkProblemDefinition,
+        candidate: CodeCandidate,
+        settings: BenchmarkExecutionSettings,
+        test_cases: tuple[BenchmarkTestCase, ...] = (),
+    ) -> BenchmarkEvaluationResult:
+        return _evaluate_compiled_benchmark_candidate(
+            problem=problem,
+            candidate=candidate,
+            settings=settings,
+            test_cases=test_cases,
+            language="cpp",
+            adapter_name=self._adapter_name,
+            artifact_root=self._artifact_root,
+            compiler_command=self._compiler_command,
+            compiler_label="C++ compiler",
+            source_filename="main.cpp",
+            executable_filename="main.exe" if os.name == "nt" else "main",
+            runtime_command=None,
+            runtime_label="C++ runtime",
+            function_invocation_supported=False,
+        )
+
+
+class JavaBenchmarkJudgeAdapter(BenchmarkAdapter):
+    """Concrete local benchmark path for compiled Java stdin-style records."""
+
+    def __init__(
+        self,
+        *,
+        javac_command: str = "javac",
+        java_command: str = "java",
+        artifact_root: Path | None = None,
+        adapter_name: str = "java-benchmark-harness",
+    ) -> None:
+        if not adapter_name:
+            raise ValueError("adapter_name must be a non-empty string")
+        self._javac_command = javac_command
+        self._java_command = java_command
+        self._artifact_root = artifact_root
+        self._adapter_name = adapter_name
+
+    def evaluate(
+        self,
+        problem: BenchmarkProblemDefinition,
+        candidate: CodeCandidate,
+        settings: BenchmarkExecutionSettings,
+        test_cases: tuple[BenchmarkTestCase, ...] = (),
+    ) -> BenchmarkEvaluationResult:
+        return _evaluate_compiled_benchmark_candidate(
+            problem=problem,
+            candidate=candidate,
+            settings=settings,
+            test_cases=test_cases,
+            language="java",
+            adapter_name=self._adapter_name,
+            artifact_root=self._artifact_root,
+            compiler_command=self._javac_command,
+            compiler_label="Java compiler",
+            source_filename="Main.java",
+            executable_filename="Main",
+            runtime_command=self._java_command,
+            runtime_label="Java runtime",
+            function_invocation_supported=False,
+        )
+
+
 class MultiLanguageBenchmarkJudgeAdapter(BenchmarkAdapter):
     """Dispatch benchmark execution to the configured language-specific harness."""
 
@@ -620,9 +871,13 @@ class MultiLanguageBenchmarkJudgeAdapter(BenchmarkAdapter):
         *,
         python_adapter: PythonBenchmarkJudgeAdapter | None = None,
         nodejs_adapter: NodeJsBenchmarkJudgeAdapter | None = None,
+        cpp_adapter: CppBenchmarkJudgeAdapter | None = None,
+        java_adapter: JavaBenchmarkJudgeAdapter | None = None,
     ) -> None:
         self._python_adapter = python_adapter or PythonBenchmarkJudgeAdapter()
         self._nodejs_adapter = nodejs_adapter or NodeJsBenchmarkJudgeAdapter()
+        self._cpp_adapter = cpp_adapter or CppBenchmarkJudgeAdapter()
+        self._java_adapter = java_adapter or JavaBenchmarkJudgeAdapter()
 
     def evaluate(
         self,
@@ -641,6 +896,20 @@ class MultiLanguageBenchmarkJudgeAdapter(BenchmarkAdapter):
             )
         if language == "javascript":
             return self._nodejs_adapter.evaluate(
+                problem,
+                candidate,
+                settings,
+                test_cases,
+            )
+        if language == "cpp":
+            return self._cpp_adapter.evaluate(
+                problem,
+                candidate,
+                settings,
+                test_cases,
+            )
+        if language == "java":
+            return self._java_adapter.evaluate(
                 problem,
                 candidate,
                 settings,
@@ -671,6 +940,7 @@ def _build_benchmark_result(
         candidate=candidate,
         settings=settings,
         sandbox_result=sandbox_result,
+        phase_results=None,
     )
     native_verdict = _map_outcome_to_native_verdict(sandbox_result.outcome)
     repository_outcome = _default_verdict_map()[native_verdict]
@@ -703,6 +973,7 @@ def _write_artifacts(
     candidate: CodeCandidate,
     settings: BenchmarkExecutionSettings,
     sandbox_result: SandboxExecutionResult,
+    phase_results: tuple[BenchmarkPhaseResult, ...] | None,
 ) -> tuple[tuple[BenchmarkPhaseResult, ...], BenchmarkArtifactIdentifiers]:
     safe_problem_id = problem.identifier.replace("/", "_").replace("\\", "_")
     run_id = f"{safe_problem_id}-{uuid.uuid4().hex[:8]}"
@@ -711,11 +982,23 @@ def _write_artifacts(
     )
     resolved_root.mkdir(parents=True, exist_ok=True)
 
+    if phase_results is None:
+        phase_results = _build_default_run_phase_results(
+            resolved_root=resolved_root,
+            run_id=run_id,
+            settings=settings,
+            sandbox_result=sandbox_result,
+        )
+    else:
+        phase_results = _attach_phase_artifacts(
+            resolved_root=resolved_root,
+            run_id=run_id,
+            phase_results=phase_results,
+            settings=settings,
+            sandbox_result=sandbox_result,
+        )
     result_path = resolved_root / f"{run_id}.result.json"
     log_path = resolved_root / f"{run_id}.log.json"
-    run_stdout_path = resolved_root / f"{run_id}.run.stdout.txt"
-    run_stderr_path = resolved_root / f"{run_id}.run.stderr.txt"
-    run_metadata_path = resolved_root / f"{run_id}.run.meta.json"
     result_path.write_text(
         json.dumps(
             {
@@ -728,6 +1011,7 @@ def _write_artifacts(
                 "outcome": sandbox_result.outcome.value,
                 "diagnostics": list(sandbox_result.diagnostics),
                 "case_results": [asdict(case_result) for case_result in sandbox_result.case_results],
+                "phase_results": [asdict(result) for result in phase_results],
                 "runtime_capabilities": (
                     asdict(sandbox_result.runtime_capabilities)
                     if sandbox_result.runtime_capabilities is not None
@@ -749,44 +1033,10 @@ def _write_artifacts(
         ),
         encoding="utf-8",
     )
-    run_stdout_path.write_text(sandbox_result.stdout, encoding="utf-8")
-    run_stderr_path.write_text(sandbox_result.stderr, encoding="utf-8")
-    run_metadata_path.write_text(
-        json.dumps(
-            {
-                "phase": BenchmarkExecutionPhase.RUN.value,
-                "invocation_mode": settings.invocation_mode.value,
-                "language": settings.language,
-                "requires_compilation": settings.requires_compilation,
-                "outcome": sandbox_result.outcome.value,
-                "returncode": sandbox_result.exit_code,
-            },
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-    phase_artifacts = (
-        BenchmarkPhaseArtifactIdentifiers(
-            phase=BenchmarkExecutionPhase.RUN,
-            stdout_artifact_uri=str(run_stdout_path),
-            stderr_artifact_uri=str(run_stderr_path),
-            metadata_artifact_uri=str(run_metadata_path),
-        ),
-    )
-    phase_results = (
-        BenchmarkPhaseResult(
-            phase=BenchmarkExecutionPhase.RUN,
-            status=(
-                BenchmarkPhaseStatus.COMPLETED
-                if sandbox_result.outcome is TestingOutcome.PASSED
-                else BenchmarkPhaseStatus.FAILED
-            ),
-            diagnostics=sandbox_result.diagnostics,
-            artifact_identifiers=phase_artifacts[0],
-            repository_outcome=sandbox_result.outcome,
-            returncode=sandbox_result.exit_code,
-            timed_out=sandbox_result.outcome is TestingOutcome.TIME_LIMIT_EXCEEDED,
-        ),
+    phase_artifacts = tuple(
+        result.artifact_identifiers
+        for result in phase_results
+        if result.artifact_identifiers is not None
     )
     return phase_results, BenchmarkArtifactIdentifiers(
         run_id=run_id,
@@ -803,6 +1053,437 @@ def _build_artifacts(submission: StubBenchmarkSubmission) -> BenchmarkArtifactId
         submission_id=submission.submission_id,
         result_artifact_uri=submission.result_artifact_uri,
         log_artifact_uri=submission.log_artifact_uri,
+    )
+
+
+def _build_default_run_phase_results(
+    *,
+    resolved_root: Path,
+    run_id: str,
+    settings: BenchmarkExecutionSettings,
+    sandbox_result: SandboxExecutionResult,
+) -> tuple[BenchmarkPhaseResult, ...]:
+    phase_artifacts = _write_phase_artifacts(
+        resolved_root=resolved_root,
+        run_id=run_id,
+        phase=BenchmarkExecutionPhase.RUN,
+        stdout=sandbox_result.stdout,
+        stderr=sandbox_result.stderr,
+        metadata={
+            "phase": BenchmarkExecutionPhase.RUN.value,
+            "invocation_mode": settings.invocation_mode.value,
+            "language": settings.language,
+            "requires_compilation": settings.requires_compilation,
+            "outcome": sandbox_result.outcome.value,
+            "returncode": sandbox_result.exit_code,
+        },
+    )
+    return (
+        BenchmarkPhaseResult(
+            phase=BenchmarkExecutionPhase.RUN,
+            status=(
+                BenchmarkPhaseStatus.COMPLETED
+                if sandbox_result.outcome is TestingOutcome.PASSED
+                else BenchmarkPhaseStatus.FAILED
+            ),
+            diagnostics=sandbox_result.diagnostics,
+            artifact_identifiers=phase_artifacts,
+            repository_outcome=sandbox_result.outcome,
+            returncode=sandbox_result.exit_code,
+            timed_out=sandbox_result.outcome is TestingOutcome.TIME_LIMIT_EXCEEDED,
+        ),
+    )
+
+
+def _build_compiled_benchmark_result(
+    *,
+    adapter_name: str,
+    artifact_root: Path | None,
+    problem: BenchmarkProblemDefinition,
+    candidate: CodeCandidate,
+    settings: BenchmarkExecutionSettings,
+    sandbox_result: SandboxExecutionResult,
+    phase_results: tuple[BenchmarkPhaseResult, ...],
+) -> BenchmarkEvaluationResult:
+    final_phase_results, artifact_identifiers = _write_artifacts(
+        artifact_root=artifact_root,
+        problem=problem,
+        candidate=candidate,
+        settings=settings,
+        sandbox_result=sandbox_result,
+        phase_results=phase_results,
+    )
+    native_verdict = _map_outcome_to_native_verdict(sandbox_result.outcome)
+    repository_outcome = _default_verdict_map()[native_verdict]
+    diagnostics = (
+        f"Evaluation ran through the external benchmark path '{adapter_name}' rather than the repository-default testing role.",
+        f"Invocation mode: {settings.invocation_mode.value}.",
+        f"Language runtime: {_normalize_benchmark_language(settings.language)}.",
+    ) + sandbox_result.diagnostics
+    return BenchmarkEvaluationResult(
+        adapter_name=adapter_name,
+        status=BenchmarkEvaluationStatus.COMPLETED,
+        problem=problem,
+        runtime_mode=BenchmarkRuntimeMode.LOCAL_HARNESS,
+        artifact_identifiers=artifact_identifiers,
+        verdict_mapping=BenchmarkVerdictMapping(
+            native_verdict=native_verdict,
+            repository_outcome=repository_outcome,
+            diagnostics=sandbox_result.diagnostics,
+        ),
+        phase_results=final_phase_results,
+        diagnostics=diagnostics,
+    )
+
+
+def _write_phase_artifacts(
+    *,
+    resolved_root: Path,
+    run_id: str,
+    phase: BenchmarkExecutionPhase,
+    stdout: str,
+    stderr: str,
+    metadata: dict[str, object],
+) -> BenchmarkPhaseArtifactIdentifiers:
+    stdout_path = resolved_root / f"{run_id}.{phase.value}.stdout.txt"
+    stderr_path = resolved_root / f"{run_id}.{phase.value}.stderr.txt"
+    metadata_path = resolved_root / f"{run_id}.{phase.value}.meta.json"
+    stdout_path.write_text(stdout, encoding="utf-8")
+    stderr_path.write_text(stderr, encoding="utf-8")
+    metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    return BenchmarkPhaseArtifactIdentifiers(
+        phase=phase,
+        stdout_artifact_uri=str(stdout_path),
+        stderr_artifact_uri=str(stderr_path),
+        metadata_artifact_uri=str(metadata_path),
+    )
+
+
+def _attach_phase_artifacts(
+    *,
+    resolved_root: Path,
+    run_id: str,
+    phase_results: tuple[BenchmarkPhaseResult, ...],
+    settings: BenchmarkExecutionSettings,
+    sandbox_result: SandboxExecutionResult,
+) -> tuple[BenchmarkPhaseResult, ...]:
+    attached_results: list[BenchmarkPhaseResult] = []
+    for phase_result in phase_results:
+        if phase_result.artifact_identifiers is not None:
+            attached_results.append(phase_result)
+            continue
+        if phase_result.phase is BenchmarkExecutionPhase.RUN:
+            stdout = sandbox_result.stdout
+            stderr = sandbox_result.stderr
+        else:
+            stdout = ""
+            stderr = "\n".join(phase_result.diagnostics)
+        metadata = {
+            "phase": phase_result.phase.value,
+            "status": phase_result.status.value,
+            "invocation_mode": settings.invocation_mode.value,
+            "language": settings.language,
+            "requires_compilation": settings.requires_compilation,
+            "repository_outcome": (
+                None
+                if phase_result.repository_outcome is None
+                else phase_result.repository_outcome.value
+            ),
+            "returncode": phase_result.returncode,
+            "timed_out": phase_result.timed_out,
+            "diagnostics": list(phase_result.diagnostics),
+        }
+        attached_results.append(
+            BenchmarkPhaseResult(
+                phase=phase_result.phase,
+                status=phase_result.status,
+                diagnostics=phase_result.diagnostics,
+                artifact_identifiers=_write_phase_artifacts(
+                    resolved_root=resolved_root,
+                    run_id=run_id,
+                    phase=phase_result.phase,
+                    stdout=stdout,
+                    stderr=stderr,
+                    metadata=metadata,
+                ),
+                repository_outcome=phase_result.repository_outcome,
+                returncode=phase_result.returncode,
+                timed_out=phase_result.timed_out,
+            )
+        )
+    return tuple(attached_results)
+
+
+def _default_compiled_compile_phase_settings(
+    *,
+    language: str,
+    compiler_command: str,
+    source_filename: str,
+    executable_filename: str,
+):
+    return BenchmarkPhaseExecutionSettings(
+        phase=BenchmarkExecutionPhase.COMPILE,
+        source_layout=(source_filename,),
+        command=(
+            compiler_command,
+            source_filename,
+            "-o",
+            executable_filename,
+        )
+        if language == "cpp"
+        else (compiler_command, source_filename),
+        executable_target=executable_filename,
+    )
+
+
+def _default_compiled_run_phase_settings(
+    *,
+    language: str,
+    runtime_command: str | None,
+    executable_filename: str,
+):
+    command = (
+        (runtime_command or executable_filename, executable_filename)
+        if language == "java"
+        else (executable_filename,)
+    )
+    return BenchmarkPhaseExecutionSettings(
+        phase=BenchmarkExecutionPhase.RUN,
+        source_layout=(executable_filename,),
+        command=command,
+        executable_target=executable_filename,
+    )
+
+
+def _materialize_phase_command(
+    *,
+    phase_command: tuple[str, ...],
+    compiler_command: str,
+    runtime_command: str | None,
+    source_path: Path,
+    executable_path: Path,
+) -> list[str]:
+    materialized: list[str] = []
+    source_filename = source_path.name
+    executable_name = executable_path.name
+    class_name = executable_path.stem
+    for token in phase_command:
+        if token == "{compiler}":
+            materialized.append(compiler_command)
+        elif token == "{runtime}":
+            materialized.append(runtime_command or str(executable_path))
+        elif token in {"{source}", "{source_name}"}:
+            materialized.append(source_filename)
+        elif token == "{source_path}":
+            materialized.append(str(source_path))
+        elif token in {"{executable}", "{executable_path}"}:
+            materialized.append(str(executable_path))
+        elif token == "{executable_name}":
+            materialized.append(executable_name)
+        elif token == "{class_name}":
+            materialized.append(class_name)
+        elif (
+            runtime_command is None
+            and token in {executable_name, f"./{executable_name}", f".\\{executable_name}"}
+        ):
+            materialized.append(str(executable_path))
+        elif token == source_filename:
+            materialized.append(source_filename)
+        else:
+            materialized.append(token)
+    return materialized
+
+
+def _phase_timeout_seconds(
+    phase_settings,
+    settings: BenchmarkExecutionSettings,
+) -> float:
+    return (
+        phase_settings.resource_limits.time_limit_seconds
+        or settings.time_limit_seconds
+        or 1.0
+    )
+
+
+def _build_compiled_compile_phase_result(
+    *,
+    phase_settings,
+    completed: _CompletedCommandProcess,
+    compiler_label: str,
+    timeout_seconds: float,
+) -> BenchmarkPhaseResult:
+    if completed.timed_out:
+        diagnostics = (
+            f"{compiler_label} exceeded the compile-phase wall-clock limit of {timeout_seconds:.1f}s.",
+            completed.stderr.strip() or completed.stdout.strip() or "The compiler did not emit diagnostics.",
+        )
+        return BenchmarkPhaseResult(
+            phase=BenchmarkExecutionPhase.COMPILE,
+            status=BenchmarkPhaseStatus.FAILED,
+            diagnostics=diagnostics,
+            repository_outcome=TestingOutcome.TIME_LIMIT_EXCEEDED,
+            returncode=completed.returncode,
+            timed_out=True,
+        )
+    if completed.returncode not in (0, None):
+        diagnostics = (
+            f"{compiler_label} failed during the compile phase with return code {completed.returncode}.",
+            completed.stderr.strip() or completed.stdout.strip() or "The compiler did not emit diagnostics.",
+        )
+        return BenchmarkPhaseResult(
+            phase=BenchmarkExecutionPhase.COMPILE,
+            status=BenchmarkPhaseStatus.FAILED,
+            diagnostics=diagnostics,
+            repository_outcome=TestingOutcome.COMPILATION_ERROR,
+            returncode=completed.returncode,
+        )
+    return BenchmarkPhaseResult(
+        phase=BenchmarkExecutionPhase.COMPILE,
+        status=BenchmarkPhaseStatus.COMPLETED,
+        diagnostics=(f"{compiler_label} completed successfully.",),
+        returncode=completed.returncode,
+    )
+
+
+def _run_compiled_benchmark_cases(
+    *,
+    run_phase,
+    settings: BenchmarkExecutionSettings,
+    test_cases: tuple[BenchmarkTestCase, ...],
+    command: list[str],
+    cwd: Path,
+    invocation_diagnostic: str,
+) -> tuple[BenchmarkPhaseResult, SandboxExecutionResult]:
+    case_results: list[JudgeCaseResult] = []
+    last_stdout = ""
+    last_stderr = ""
+    last_exit_code: int | None = None
+    timeout_seconds = _phase_timeout_seconds(run_phase, settings)
+    for test_case in test_cases:
+        completed = _run_command(
+            command=command,
+            cwd=cwd,
+            timeout_seconds=timeout_seconds,
+            stdin_text=test_case.stdin_text,
+        )
+        last_stdout = completed.stdout
+        last_stderr = completed.stderr
+        last_exit_code = completed.returncode
+        if completed.timed_out:
+            diagnostics = (
+                f"Case '{test_case.name}' exceeded the run-phase wall-clock limit of {timeout_seconds:.1f}s.",
+                invocation_diagnostic,
+            )
+            sandbox_result = SandboxExecutionResult(
+                outcome=TestingOutcome.TIME_LIMIT_EXCEEDED,
+                diagnostics=diagnostics,
+                case_results=tuple(case_results),
+                stdout=completed.stdout,
+                stderr=completed.stderr,
+                exit_code=completed.returncode,
+            )
+            return (
+                BenchmarkPhaseResult(
+                    phase=BenchmarkExecutionPhase.RUN,
+                    status=BenchmarkPhaseStatus.FAILED,
+                    diagnostics=diagnostics,
+                    repository_outcome=TestingOutcome.TIME_LIMIT_EXCEEDED,
+                    returncode=completed.returncode,
+                    timed_out=True,
+                ),
+                sandbox_result,
+            )
+        if completed.returncode not in (0, None):
+            diagnostics = (
+                f"Case '{test_case.name}' exited with return code {completed.returncode}.",
+                completed.stderr.strip() or "The runtime did not emit stderr diagnostics.",
+                invocation_diagnostic,
+            )
+            sandbox_result = SandboxExecutionResult(
+                outcome=TestingOutcome.RUNTIME_ERROR,
+                diagnostics=diagnostics,
+                case_results=tuple(case_results),
+                stdout=completed.stdout,
+                stderr=completed.stderr,
+                exit_code=completed.returncode,
+            )
+            return (
+                BenchmarkPhaseResult(
+                    phase=BenchmarkExecutionPhase.RUN,
+                    status=BenchmarkPhaseStatus.FAILED,
+                    diagnostics=diagnostics,
+                    repository_outcome=TestingOutcome.RUNTIME_ERROR,
+                    returncode=completed.returncode,
+                ),
+                sandbox_result,
+            )
+        actual_stdout = completed.stdout
+        expected_stdout = _expected_stdout_for_script_case(test_case)
+        if _normalize_text(actual_stdout) != _normalize_text(expected_stdout):
+            diagnostics = (
+                f"Case '{test_case.name}' printed {actual_stdout.strip()!r}; expected {expected_stdout!r}.",
+                invocation_diagnostic,
+            )
+            case_results.append(
+                JudgeCaseResult(
+                    name=test_case.name,
+                    outcome=TestingOutcome.WRONG_ANSWER,
+                    diagnostics=diagnostics,
+                    actual_stdout=actual_stdout,
+                    expected_stdout=expected_stdout,
+                    expected_output=test_case.expected_output,
+                )
+            )
+            sandbox_result = SandboxExecutionResult(
+                outcome=TestingOutcome.WRONG_ANSWER,
+                diagnostics=diagnostics,
+                case_results=tuple(case_results),
+                stdout=completed.stdout,
+                stderr=completed.stderr,
+                exit_code=completed.returncode,
+            )
+            return (
+                BenchmarkPhaseResult(
+                    phase=BenchmarkExecutionPhase.RUN,
+                    status=BenchmarkPhaseStatus.FAILED,
+                    diagnostics=diagnostics,
+                    repository_outcome=TestingOutcome.WRONG_ANSWER,
+                    returncode=completed.returncode,
+                ),
+                sandbox_result,
+            )
+        case_results.append(
+            JudgeCaseResult(
+                name=test_case.name,
+                outcome=TestingOutcome.PASSED,
+                diagnostics=(invocation_diagnostic,),
+                actual_stdout=actual_stdout,
+                expected_stdout=expected_stdout,
+                expected_output=test_case.expected_output,
+            )
+        )
+
+    diagnostics = (
+        f"Judge accepted the candidate across {len(test_cases)} case(s).",
+        invocation_diagnostic,
+    )
+    sandbox_result = SandboxExecutionResult(
+        outcome=TestingOutcome.PASSED,
+        diagnostics=diagnostics,
+        case_results=tuple(case_results),
+        stdout=last_stdout,
+        stderr=last_stderr,
+        exit_code=last_exit_code,
+    )
+    return (
+        BenchmarkPhaseResult(
+            phase=BenchmarkExecutionPhase.RUN,
+            status=BenchmarkPhaseStatus.COMPLETED,
+            diagnostics=diagnostics,
+            repository_outcome=TestingOutcome.PASSED,
+            returncode=last_exit_code,
+        ),
+        sandbox_result,
     )
 
 
@@ -1049,6 +1730,11 @@ def _normalize_benchmark_language(value: str) -> str:
         "js": "javascript",
         "node": "javascript",
         "nodejs": "javascript",
+        "cpp": "cpp",
+        "c++": "cpp",
+        "cc": "cpp",
+        "cxx": "cpp",
+        "java": "java",
     }
     return aliases.get(normalized, normalized)
 

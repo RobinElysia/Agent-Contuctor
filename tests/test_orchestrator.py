@@ -1,7 +1,12 @@
+import json
+from pathlib import Path
+
 from agentconductor import (
     DifficultyLevel,
+    OrchestratorCheckpointLoadError,
     ProblemInstance,
     generate_sft_dataset_entrypoint,
+    load_sft_checkpoint_entrypoint,
     TopologyCandidateExtractionError,
     TopologyLogicError,
     plan_problem_topology,
@@ -204,7 +209,7 @@ def test_plan_problem_topology_candidate_can_load_checkpoint_artifact(
 ) -> None:
     dataset_path = tmp_path / "sft-dataset.jsonl"
     artifact_path = tmp_path / "sft-run.json"
-    generate_sft_dataset_entrypoint(dataset_path)
+    generate_sft_dataset_entrypoint(dataset_path, sample_count=9)
     run_sft_baseline_entrypoint(dataset_path, artifact_path)
 
     candidate = plan_problem_topology_candidate(
@@ -219,6 +224,34 @@ def test_plan_problem_topology_candidate_can_load_checkpoint_artifact(
     assert candidate.kind is TopologyPromptKind.INITIAL
     assert candidate.topology.difficulty is DifficultyLevel.EASY
     assert candidate.topology_yaml.startswith("difficulty: easy\n")
+
+
+def test_plan_problem_topology_candidate_rejects_missing_runtime_artifact(
+    tmp_path,
+) -> None:
+    dataset_path = tmp_path / "sft-dataset.jsonl"
+    artifact_path = tmp_path / "sft-run.json"
+    generate_sft_dataset_entrypoint(dataset_path, sample_count=9)
+    run_sft_baseline_entrypoint(dataset_path, artifact_path)
+    checkpoint = load_sft_checkpoint_entrypoint(
+        Path(json.loads(artifact_path.read_text(encoding="utf-8"))["checkpoint_path"])
+    )
+    runtime_artifact_path = checkpoint.runtime_artifact_path
+    assert runtime_artifact_path is not None
+    Path(runtime_artifact_path).unlink()
+
+    with pytest.raises(
+        OrchestratorCheckpointLoadError,
+        match="runtime artifact is missing",
+    ):
+        plan_problem_topology_candidate(
+            ProblemInstance(
+                identifier="policy-checkpoint-missing-runtime",
+                prompt="Implement a correct solution.",
+                difficulty=DifficultyLevel.EASY,
+            ),
+            orchestrator_checkpoint=artifact_path,
+        )
 
 
 def test_revise_problem_topology_candidate_retries_and_surfaces_last_validation_error() -> None:

@@ -35,6 +35,9 @@ from agentconductor.infrastructure.topology_yaml import (
     dump_topology_yaml_mapping,
     parse_topology_plan_yaml,
 )
+from agentconductor.infrastructure.orchestrator_runtime import (
+    load_repository_frozen_orchestrator_runtime,
+)
 
 
 class ProblemShape(StrEnum):
@@ -67,7 +70,10 @@ YAML_FENCE_PATTERN = re.compile(
     r"```(?:yaml|yml)?\s*(.*?)```",
     re.IGNORECASE | re.DOTALL,
 )
-SUPPORTED_FROZEN_PROMPT_TEMPLATE = "orchestrator-sft-v1"
+SUPPORTED_FROZEN_PROMPT_TEMPLATES = (
+    "orchestrator-sft-v1",
+    "orchestrator-sft-v2",
+)
 SUPPORTED_FROZEN_DEVICE = "cpu"
 
 
@@ -80,29 +86,22 @@ class CheckpointTopologyPolicy:
         *,
         device: str = SUPPORTED_FROZEN_DEVICE,
     ) -> None:
-        if device != SUPPORTED_FROZEN_DEVICE:
-            raise OrchestratorCheckpointLoadError(
-                "repository-local frozen inference currently supports only "
-                f"device='{SUPPORTED_FROZEN_DEVICE}'"
-            )
         if metadata.target_format != "yaml":
             raise OrchestratorCheckpointLoadError(
                 "checkpoint metadata must target YAML frozen inference"
             )
-        if metadata.prompt_template_version != SUPPORTED_FROZEN_PROMPT_TEMPLATE:
+        if metadata.prompt_template_version not in SUPPORTED_FROZEN_PROMPT_TEMPLATES:
             raise OrchestratorCheckpointLoadError(
                 "checkpoint prompt template version "
-                f"'{metadata.prompt_template_version}' is not supported; expected "
-                f"'{SUPPORTED_FROZEN_PROMPT_TEMPLATE}'"
-            )
-        checkpoint_dir = Path(metadata.checkpoint_path)
-        weights_stub_path = checkpoint_dir / "weights.stub"
-        if not weights_stub_path.exists():
-            raise OrchestratorCheckpointLoadError(
-                f"checkpoint weights artifact is missing: {weights_stub_path}"
+                f"'{metadata.prompt_template_version}' is not supported; expected one of "
+                f"{SUPPORTED_FROZEN_PROMPT_TEMPLATES}"
             )
         self.metadata = metadata
         self.device = device
+        self.runtime = load_repository_frozen_orchestrator_runtime(
+            metadata,
+            device=device,
+        )
 
     def generate_topology_candidate(
         self,
@@ -111,9 +110,7 @@ class CheckpointTopologyPolicy:
         request: OrchestratorPromptRequest,
     ) -> str:
         del prompt
-        if request.kind is TopologyPromptKind.INITIAL:
-            topology = plan_topology_for_problem(request.problem)
-        else:
+        if request.kind is TopologyPromptKind.REVISION:
             if request.testing_feedback is None:
                 raise OrchestratorCheckpointLoadError(
                     "revision inference requires testing feedback"
@@ -126,18 +123,7 @@ class CheckpointTopologyPolicy:
                 raise OrchestratorCheckpointLoadError(
                     "revision inference requires remaining_turns"
                 )
-            topology = revise_topology_for_feedback(
-                TopologyRevisionInput(
-                    problem=request.problem,
-                    selected_difficulty=request.selected_difficulty,
-                    turn_index=request.turn_index,
-                    prior_topology=request.prior_topology,
-                    prior_execution_status=ExecutionStatus.COMPLETED,
-                    testing_feedback=request.testing_feedback,
-                    remaining_turns=request.remaining_turns,
-                )
-            )
-        return dump_topology_yaml_mapping(topology.to_mapping())
+        return self.runtime.generate(request)
 
 
 def infer_problem_shape(problem: ProblemInstance) -> ProblemShape:

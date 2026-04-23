@@ -11,9 +11,12 @@ from agentconductor import (
     TopologyPlan,
     TopologyStep,
     TopologyValidationError,
+    WorkerGenerationResult,
+    WorkerRuntimeError,
     execute_topology_plan,
     plan_problem_topology,
 )
+from agentconductor.domain.worker_runtime import WorkerGenerationRequest, WorkerRoleRuntime
 
 
 def test_execute_topology_plan_runs_valid_plan_end_to_end() -> None:
@@ -35,6 +38,8 @@ def test_execute_topology_plan_runs_valid_plan_end_to_end() -> None:
     assert result.sandbox_result.outcome is TestingOutcome.PASSED
     coder_result = result.step_results[1].agent_results[1]
     assert coder_result.agent_name == "coder_1"
+    assert coder_result.worker_runtime == "repository-worker-runtime"
+    assert coder_result.worker_model == "gpt-4o-mini-compatible-stub"
     assert tuple(output.agent_name for output in coder_result.consumed_outputs) == (
         "retrieval_0",
         "planner_0",
@@ -94,3 +99,34 @@ def test_execute_topology_plan_rejects_invalid_references() -> None:
         match="references unknown prior agent 'missing_0'",
     ):
         execute_topology_plan(problem, invalid_plan)
+
+
+def test_execute_topology_plan_surfaces_worker_runtime_failure() -> None:
+    class FailingWorkerRuntime(WorkerRoleRuntime):
+        def supports_role(self, role: AgentRole) -> bool:
+            return role is not AgentRole.TESTING
+
+        def generate_role_output(
+            self,
+            request: WorkerGenerationRequest,
+        ) -> WorkerGenerationResult:
+            raise WorkerRuntimeError(
+                f"synthetic worker runtime failure for role '{request.agent.role.value}'"
+            )
+
+    problem = ProblemInstance(
+        identifier="worker-runtime-fail",
+        prompt="Implement a correct solution.",
+        difficulty=DifficultyLevel.EASY,
+    )
+    plan = plan_problem_topology(problem)
+
+    with pytest.raises(
+        WorkerRuntimeError,
+        match="synthetic worker runtime failure",
+    ):
+        execute_topology_plan(
+            problem,
+            plan,
+            worker_runtime=FailingWorkerRuntime(),
+        )

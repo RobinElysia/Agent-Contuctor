@@ -1,134 +1,59 @@
 # AgentConductor
 
-AgentConductor 是一个面向后端的 Python 项目，目标是把论文 `2602.17100v1.pdf` 中的方法整理成可复用、可测试、可持续迭代的软件系统。
+AgentConductor 是一个面向后端的 Python 项目，目标是把论文 `2602.17100v1.pdf` 的方法整理成可复用的软件系统。
 
 当前仓库已经提供：
 
 - 基于 `uv` 管理的 `src/` 布局 Python 包
-- 论文方法对应的 typed domain contracts
-- 有界多轮 `solve_problem(...)` API
-- `TopologyPlan <-> YAML` 的稳定传输契约
-- deterministic planner、learned orchestrator boundary、checkpoint-backed frozen inference
-- benchmark dataset ingestion、benchmark adapter seam、SFT checkpoint、RL checkpoint update、benchmark-aligned evaluation
-- Python / JavaScript 本地 benchmark harness
-- phase-aware benchmark contract，用来显式表示 compile / run 两个阶段
-- vendor-native benchmark runtime boundary，用来显式表示 submission / polling / terminal verdict / artifact provenance
+- 面向论文方法的 typed domain contracts
+- 稳定的 Python solve API，支持 bounded multi-turn 执行
+- `TopologyPlan <-> YAML` 的稳定 transport contract
+- deterministic planner 与 learned orchestrator boundary
+- checkpoint-backed frozen orchestrator runtime
+- 非 `testing` worker 的 model-backed runtime seam
+- 本地 judge、benchmark ingestion、SFT/RL artifact、benchmark-aligned evaluation
 
-当前状态仍然不是论文级完整 runtime。仓库更适合做方法复现、接口接线、artifact 审计和可重复评测，而不是直接宣称严格 leaderboard reproduction。
+当前严格复现结论仍然是 `approximate reproduction`。统一 fidelity checklist 见 [docs/reproduction.md](/D:/code/PaperCreate/AgentConductor/docs/reproduction.md)。
 
-## 当前进度
+## 当前状态
 
-已完成的关键任务包括：
+最近完成的关键任务包括：
 
-- `TOP-02`：YAML-native topology serialization / parsing
+- `TOP-02`：Topology YAML contract 与 typed parsing
 - `ORCH-02`：model-backed YAML orchestrator boundary
-- `TRAIN-02`：checkpoint-producing supervised training path
-- `ORCH-03`：checkpoint-backed frozen inference 接入在线 solve loop
-- `RL-02`：从 source checkpoint 出发的 RL checkpoint update path
-- `EVAL-02`：benchmark-aligned frozen-inference evaluation，产出 per-attempt artifacts 与 `pass@1` / `pass@k`
-- `BENCH-01` 到 `BENCH-04`：canonical benchmark dataset + Python / JavaScript 本地 benchmark harness
-- `BENCH-05`：compiled-language compile / run phase contract
-- `BENCH-07`：vendor-native benchmark runtime boundary
+- `TRAIN-02`：可加载 checkpoint metadata 的 SFT 路径
+- `ORCH-03`：checkpoint 接入在线 frozen inference
+- `ORCH-04`：从 checkpoint runtime bundle 加载 frozen orchestrator
+- `EXEC-02`：非 `testing` worker 改为显式 model-backed runtime
+- `TRAIN-03`：paper-oriented synthetic YAML-topology SFT corpus 扩展，默认支持 4,500 样本 dataset preparation，并记录 dataset sidecar metadata、optimizer/tokenizer/backbone provenance 与 reduced-scale 标记
+- `RL-02`：checkpoint lineage 与 grouped rollout artifact
+- `EVAL-02`：checkpoint-backed benchmark-aligned evaluation
 
-仍未完成的重点：
-
-- `BENCH-06`：第一个本地 compiled-language harness
-- 真正的外部 vendor-native benchmark service 接入
-- 真实模型权重加载与生产级 frozen inference
-- 论文规模训练与严格 leaderboard 复现
+当前主线目标是 `RL + LLM` 任务编排，不再把 benchmark fidelity 或 strict reproduction 作为主阻塞项。
 
 ## 根目录文档
 
 - [README.md](/D:/code/PaperCreate/AgentConductor/README.md)：英文总览
-- [API.md](/D:/code/PaperCreate/AgentConductor/API.md)：公开 API 与 public types
-- [use.md](/D:/code/PaperCreate/AgentConductor/use.md)：常见使用方式与工作流
+- [API.md](/D:/code/PaperCreate/AgentConductor/API.md)：公开 API 与类型契约
+- [use.md](/D:/code/PaperCreate/AgentConductor/use.md)：常见使用方式
 - [docs/tasks.md](/D:/code/PaperCreate/AgentConductor/docs/tasks.md)：任务卡与状态
-- [docs/Paper.md](/D:/code/PaperCreate/AgentConductor/docs/Paper.md)：论文实现导向总结
+- [docs/Paper.md](/D:/code/PaperCreate/AgentConductor/docs/Paper.md)：论文方法整理
+- [docs/tech.md](/D:/code/PaperCreate/AgentConductor/docs/tech.md)：技术边界与架构约束
+- [docs/reproduction.md](/D:/code/PaperCreate/AgentConductor/docs/reproduction.md)：严格复现缺口审计
 
-## Python API 概览
+## 现在能做什么
 
-当前稳定入口包括：
+- 用 `plan_problem_topology(...)` 或 `plan_problem_topology_candidate(...)` 生成 topology
+- 用 `solve_problem(...)` 跑 bounded multi-turn solve
+- 用 `orchestrator_checkpoint=...` 从 checkpoint runtime bundle 做 frozen inference
+- 用 `worker_runtime=...` 替换非 `testing` worker runtime
+- 生成 paper-oriented synthetic SFT dataset，并写出 dataset sidecar metadata、training manifest、checkpoint metadata
+- 运行 repository-local RL checkpoint update path，并保留 rollout artifacts
 
-- `solve_problem(...)`
-- `plan_problem_topology(...)`
-- `plan_problem_topology_candidate(...)`
-- `revise_problem_topology_candidate(...)`
-- `execute_topology_plan(...)`
-- `serialize_topology_plan_to_yaml(...)`
-- `parse_topology_plan_yaml(...)`
-- `run_benchmark_evaluation_entrypoint(...)`
-- `load_sft_checkpoint_entrypoint(...)`
-- `run_rl_baseline_entrypoint(...)`
+## 当前边界
 
-示例：
-
-```python
-from agentconductor import DifficultyLevel, ProblemInstance, solve_problem
-
-result = solve_problem(
-    ProblemInstance(
-        identifier="apps-checkpoint",
-        prompt="Fix the failing implementation.",
-        difficulty=DifficultyLevel.EASY,
-    ),
-    max_turns=2,
-    orchestrator_checkpoint="artifacts/sft-run.json",
-)
-
-print(result.status)
-print(result.notes[1])
-print(result.notes[2])
-```
-
-说明：
-
-- 不传 `orchestrator_policy` 或 `orchestrator_checkpoint` 时，默认走 deterministic planner
-- 传 `orchestrator_policy` 时，走 direct learned YAML boundary
-- 传 `orchestrator_checkpoint` 时，仓库会从 checkpoint 目录、metadata 文件或 training artifact 中显式解析 checkpoint，再走 checkpoint-backed frozen inference
-
-## Benchmark 能力边界
-
-当前 benchmark 相关能力分成两类：
-
-- repository-local harness
-  现在默认支持 Python / JavaScript 本地执行
-- vendor-native runtime boundary
-  现在已经有 typed submission / polling / result lifecycle，但仓库内置验证仍然是 fixture-driven stub，而不是 live external service
-
-当前 benchmark contract 已经支持：
-
-- `BenchmarkExecutionSettings.phase_settings`
-- compile phase 与 run phase 的显式配置
-- source layout、command template、executable target、phase-specific resource limits
-- `BenchmarkPhaseResult` 与 `BenchmarkPhaseArtifactIdentifiers`
-- `BenchmarkVendorSubmissionReceipt` 与 `BenchmarkVendorPollSnapshot`
-
-这意味着 compile failure、run-time failure、adapter error、vendor poll lifecycle 现在都能被结构化记录，而不是再被压平成一个 generic runtime error。
-
-## 评测路径
-
-当前评测路径会：
-
-- 读取 canonical benchmark dataset
-- 用 frozen orchestrator checkpoint 跑 solve
-- 将 candidate 再送入 benchmark adapter 复判
-- 输出 per-attempt artifacts 与 aggregate metrics
-
-artifact 会显式记录：
-
-- `dataset_version`
-- `harness_version`
-- `runtime_mode`
-- `checkpoint_id`
-- `pass@1`
-- `pass@k`
-
-默认评测 runtime 仍然是 repository-local benchmark harness，因此这些结果应被视为 benchmark-aligned metrics。只有当调用方明确切换到真实 vendor-native adapter，并且外部 benchmark 约束满足时，才更接近论文级 reproduction。
-
-## 下一步建议
-
-如果继续沿主链推进，优先顺序通常是：
-
-1. 完成 `BENCH-06`，补上第一个本地 compiled-language harness
-2. 用真实外部服务替换当前 fixture-driven vendor-native stub
-3. 用真实模型加载替换当前 mock checkpoint runtime
+- frozen orchestrator runtime 依赖 checkpoint 内的 `orchestrator-runtime.json`
+- 默认只支持 `orchestrator_device="cpu"`
+- 默认 worker runtime 仍是 repository-local `gpt-4o-mini-compatible-stub`
+- `TRAIN-03` 已把 SFT 数据准备推进到 paper-oriented 4,500 样本规模，但训练本体仍是 repository-local approximation，不应宣称 exact paper-scale SFT
+- `RL-02` 仍是轻量 GRPO-shaped path，后续真正的主线任务是 `RL-03`

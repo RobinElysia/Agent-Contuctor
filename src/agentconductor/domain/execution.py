@@ -186,6 +186,8 @@ class AgentExecutionResult:
     diagnostics: tuple[str, ...] = ()
     testing_outcome: TestingOutcome | None = None
     sandbox_result: SandboxExecutionResult | None = None
+    worker_runtime: str | None = None
+    worker_model: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

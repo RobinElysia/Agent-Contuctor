@@ -14,6 +14,11 @@ from agentconductor.application.evaluation import (
     run_batch_evaluation,
     run_batch_evaluation_entrypoint,
 )
+from agentconductor.application.reproduction import (
+    build_reproduction_audit,
+    write_reproduction_audit,
+    write_reproduction_audit_entrypoint,
+)
 from agentconductor.application.rl import (
     compute_reward_breakdown,
     compute_reward_breakdown_entrypoint,
@@ -66,6 +71,12 @@ from agentconductor.domain.evaluation import (
     EvaluationRunArtifact,
     EvaluationRunMetadata,
     EvaluationSummary,
+)
+from agentconductor.domain.reproduction import (
+    ReproductionAudit,
+    ReproductionChecklistItem,
+    ReproductionClaim,
+    ReproductionStatus,
 )
 from agentconductor.domain.rl import (
     RewardBreakdown,
@@ -132,15 +143,25 @@ from agentconductor.domain.topology import (
 )
 from agentconductor.domain.training import (
     OrchestratorCheckpointMetadata,
+    SftDatasetConfig,
+    SftDatasetMetadata,
     SftTrainingArtifact,
     SftTrainingConfig,
     SyntheticTopologySample,
+)
+from agentconductor.domain.worker_runtime import (
+    WorkerGenerationRequest,
+    WorkerGenerationResult,
+    WorkerRoleRuntime,
+    WorkerRuntimeError,
 )
 from agentconductor.infrastructure.sandbox import (
     PythonSubprocessJudgeAdapter,
     PythonSubprocessSandboxAdapter,
 )
 from agentconductor.infrastructure.benchmark import (
+    CppBenchmarkJudgeAdapter,
+    JavaBenchmarkJudgeAdapter,
     MultiLanguageBenchmarkJudgeAdapter,
     NodeJsBenchmarkJudgeAdapter,
     PythonBenchmarkJudgeAdapter,
@@ -150,6 +171,11 @@ from agentconductor.infrastructure.benchmark import (
     StubVendorSubmissionScenario,
 )
 from agentconductor.infrastructure.benchmark_dataset import read_jsonl_objects
+from agentconductor.infrastructure.orchestrator_runtime import (
+    RepositoryFrozenOrchestratorBundle,
+    RepositoryFrozenOrchestratorRuntime,
+)
+from agentconductor.infrastructure.worker_runtime import RepositoryWorkerModelRuntime
 from agentconductor.interfaces.api import (
     parse_topology_plan_yaml,
     plan_problem_topology,
@@ -216,11 +242,20 @@ __all__ = [
     "OrchestratorCheckpointLoadError",
     "OrchestratorCheckpointSelectionError",
     "ProblemInstance",
+    "ReproductionAudit",
+    "ReproductionChecklistItem",
+    "ReproductionClaim",
+    "ReproductionStatus",
     "OrchestratorMode",
     "OrchestratorPromptRequest",
     "NodeJsBenchmarkJudgeAdapter",
+    "CppBenchmarkJudgeAdapter",
+    "JavaBenchmarkJudgeAdapter",
     "ProjectOverview",
     "PythonBenchmarkJudgeAdapter",
+    "RepositoryFrozenOrchestratorBundle",
+    "RepositoryFrozenOrchestratorRuntime",
+    "RepositoryWorkerModelRuntime",
     "PythonSubprocessJudgeAdapter",
     "PythonSubprocessSandboxAdapter",
     "RewardBreakdown",
@@ -243,6 +278,8 @@ __all__ = [
     "SolveTurnRecord",
     "StepExecutionResult",
     "StopReason",
+    "SftDatasetConfig",
+    "SftDatasetMetadata",
     "SftTrainingArtifact",
     "SftTrainingConfig",
     "TestingOutcome",
@@ -259,12 +296,17 @@ __all__ = [
     "TopologyStep",
     "TopologyValidationError",
     "SyntheticTopologySample",
+    "WorkerGenerationRequest",
+    "WorkerGenerationResult",
+    "WorkerRoleRuntime",
+    "WorkerRuntimeError",
     "MultiLanguageBenchmarkJudgeAdapter",
     "StubBenchmarkAdapter",
     "StubBenchmarkSubmission",
     "StubVendorNativeBenchmarkAdapter",
     "StubVendorSubmissionScenario",
     "bootstrap_overview",
+    "build_reproduction_audit",
     "compute_reward_breakdown",
     "compute_reward_breakdown_entrypoint",
     "evaluate_candidate_batch",
@@ -296,4 +338,6 @@ __all__ = [
     "run_sft_baseline_entrypoint",
     "serialize_topology_plan_to_yaml",
     "solve_problem",
+    "write_reproduction_audit",
+    "write_reproduction_audit_entrypoint",
 ]

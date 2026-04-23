@@ -25,6 +25,7 @@ from agentconductor.domain.models import (
     SolveResult,
     SolveStatus,
 )
+from agentconductor.domain.worker_runtime import WorkerRoleRuntime
 
 
 def solve_request(
@@ -35,6 +36,7 @@ def solve_request(
     orchestrator_checkpoint_id: str | None = None,
     orchestrator_device: str = "cpu",
     orchestrator_max_attempts: int = 1,
+    worker_runtime: WorkerRoleRuntime | None = None,
 ) -> SolveResult:
     """Prepare and execute a typed single-turn solve request.
 
@@ -78,7 +80,7 @@ def solve_request(
             policy=resolved_policy,
             max_attempts=orchestrator_max_attempts,
         ).topology
-    execution = execute_topology(problem, topology)
+    execution = execute_topology(problem, topology, worker_runtime=worker_runtime)
     solve_state = append_turn_result(solve_state, topology=topology, execution=execution)
 
     while (
@@ -94,7 +96,7 @@ def solve_request(
                 policy=resolved_policy,
                 max_attempts=orchestrator_max_attempts,
             ).topology
-        execution = execute_topology(problem, topology)
+        execution = execute_topology(problem, topology, worker_runtime=worker_runtime)
         solve_state = append_turn_result(solve_state, topology=topology, execution=execution)
 
     status = (
@@ -126,6 +128,7 @@ def solve_request(
                 f"'{orchestrator_device}'."
             ),
             "Later turns consume typed testing feedback through a local revision-input contract.",
+            "Non-testing worker roles now run through an explicit model-backed runtime seam.",
             "Testing outcomes now come from a repository-local Python subprocess judge adapter.",
         ),
     )

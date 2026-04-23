@@ -157,11 +157,22 @@ def _parse_checkpoint_metadata_payload(
         epochs=payload["epochs"],
         learning_rate=payload["learning_rate"],
         seed=payload["seed"],
+        source_dataset_metadata_path=payload.get("source_dataset_metadata_path"),
+        source_recipe_name=payload.get(
+            "source_recipe_name",
+            "paper-oriented-synthetic-yaml-v1",
+        ),
+        paper_target_sample_count=payload.get("paper_target_sample_count", 4500),
+        uses_reduced_paper_subset=payload.get("uses_reduced_paper_subset", True),
+        scale_label=payload.get("scale_label", "reduced-scale-approximate"),
         training_stage=payload.get("training_stage", "sft"),
         parent_checkpoint_id=payload.get("parent_checkpoint_id"),
-        optimizer_name=payload.get("optimizer_name"),
+        optimizer_name=payload.get("optimizer_name", "adamw"),
         optimizer_steps=payload.get("optimizer_steps", 0),
         average_reward=payload.get("average_reward"),
+        runtime_kind=payload.get("runtime_kind", "repository_frozen_bundle"),
+        runtime_artifact_path=payload.get("runtime_artifact_path"),
+        weights_path=payload.get("weights_path"),
     )
 
 

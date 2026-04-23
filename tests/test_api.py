@@ -58,6 +58,7 @@ def test_solve_problem_returns_typed_boundary_result() -> None:
         "debugging",
         "testing",
     )
+    assert result.execution.step_results[0].agent_results[0].worker_runtime == "repository-worker-runtime"
 
 
 def test_solve_problem_uses_inferred_baseline_defaults() -> None:
@@ -167,7 +168,11 @@ def test_solve_problem_returns_failure_when_execution_fails(
     )
 
     monkeypatch.setattr(api_module, "plan_topology_for_problem", lambda problem: topology)
-    monkeypatch.setattr(api_module, "execute_topology", lambda problem, topology: failed_execution)
+    monkeypatch.setattr(
+        api_module,
+        "execute_topology",
+        lambda problem, topology, worker_runtime=None: failed_execution,
+    )
 
     result = solve_problem(
         ProblemInstance(
@@ -261,7 +266,13 @@ def test_solve_problem_runs_second_turn_after_failure_and_stops_on_pass(
         planned_topologies.append(topology)
         return topology
 
-    def fake_execute(problem: ProblemInstance, topology: TopologyPlan) -> TopologyExecutionResult:
+    def fake_execute(
+        problem: ProblemInstance,
+        topology: TopologyPlan,
+        *,
+        worker_runtime=None,
+    ) -> TopologyExecutionResult:
+        del worker_runtime
         attempt_index = len(executions)
         if attempt_index == 0:
             result = TopologyExecutionResult(
@@ -410,7 +421,13 @@ steps:
             agent_name: debugger_t1_2
 """
 
-    def fake_execute(problem: ProblemInstance, topology: TopologyPlan) -> TopologyExecutionResult:
+    def fake_execute(
+        problem: ProblemInstance,
+        topology: TopologyPlan,
+        *,
+        worker_runtime=None,
+    ) -> TopologyExecutionResult:
+        del worker_runtime
         if topology.steps[-1].agents[0].name == "tester_2":
             return TopologyExecutionResult(
                 problem=problem,
@@ -493,10 +510,16 @@ def test_solve_problem_can_use_checkpoint_backed_frozen_inference(
 ) -> None:
     dataset_path = tmp_path / "sft-dataset.jsonl"
     artifact_path = tmp_path / "sft-run.json"
-    generate_sft_dataset_entrypoint(dataset_path)
+    generate_sft_dataset_entrypoint(dataset_path, sample_count=9)
     run_sft_baseline_entrypoint(dataset_path, artifact_path)
 
-    def fake_execute(problem: ProblemInstance, topology: TopologyPlan) -> TopologyExecutionResult:
+    def fake_execute(
+        problem: ProblemInstance,
+        topology: TopologyPlan,
+        *,
+        worker_runtime=None,
+    ) -> TopologyExecutionResult:
+        del worker_runtime
         if topology.steps[-1].agents[0].name == "tester_2":
             return TopologyExecutionResult(
                 problem=problem,
@@ -575,7 +598,7 @@ def test_solve_problem_checkpoint_directory_requires_explicit_selection_when_mul
     dataset_path = tmp_path / "sft-dataset.jsonl"
     artifact_a = tmp_path / "sft-run-a.json"
     artifact_b = tmp_path / "sft-run-b.json"
-    generate_sft_dataset_entrypoint(dataset_path)
+    generate_sft_dataset_entrypoint(dataset_path, sample_count=9)
     run_sft_baseline_entrypoint(dataset_path, artifact_a, seed=0)
     run_sft_baseline_entrypoint(dataset_path, artifact_b, seed=1)
 

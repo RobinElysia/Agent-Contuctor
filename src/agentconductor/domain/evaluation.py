@@ -76,6 +76,9 @@ class EvaluationRunMetadata:
     checkpoint_id: str
     checkpoint_path: str
     checkpoint_training_stage: str
+    reproduction_claim: str
+    exact_reproduction_ready: bool
+    blocking_gap_ids: tuple[str, ...] = ()
     split_name: str | None = None
     samples_per_problem: int = 1
     max_turns: int = 1

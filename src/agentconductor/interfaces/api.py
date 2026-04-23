@@ -12,6 +12,7 @@ from agentconductor.domain.history import TopologyRevisionInput
 from agentconductor.domain.orchestration import LearnedTopologyPlan, TopologyOrchestratorPolicy
 from agentconductor.domain.models import ProblemInstance, SolveRequest, SolveResult
 from agentconductor.domain.topology import TopologyPlan
+from agentconductor.domain.worker_runtime import WorkerRoleRuntime
 from agentconductor.infrastructure.topology_yaml import (
     dump_topology_yaml_mapping,
     parse_topology_plan_yaml as parse_topology_plan_yaml_text,
@@ -32,6 +33,7 @@ def solve_problem(
     orchestrator_checkpoint_id: str | None = None,
     orchestrator_device: str = "cpu",
     orchestrator_max_attempts: int = 1,
+    worker_runtime: WorkerRoleRuntime | None = None,
 ) -> SolveResult:
     """Return a structured solve result for a problem instance."""
     return solve_request(
@@ -41,6 +43,7 @@ def solve_problem(
         orchestrator_checkpoint_id=orchestrator_checkpoint_id,
         orchestrator_device=orchestrator_device,
         orchestrator_max_attempts=orchestrator_max_attempts,
+        worker_runtime=worker_runtime,
     )
 
 

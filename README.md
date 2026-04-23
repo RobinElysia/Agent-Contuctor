@@ -10,15 +10,21 @@ The repository currently provides:
 - a typed multi-turn solve-state contract for turn history and later revision
 - a deterministic topology planner that emits validated single-turn plans
 - a learned-orchestrator policy boundary that produces topology YAML candidates and parses them into validated typed plans
-- a single-turn graph executor whose testing role runs through a local subprocess judge adapter
+- a checkpoint-backed frozen orchestrator runtime that loads a repository-local runtime bundle instead of relying on metadata plus `weights.stub` alone
+- a single-turn graph executor whose non-testing worker roles now run through an explicit model-backed runtime seam and whose testing role runs through a local subprocess judge adapter
 - a typed external benchmark adapter seam for benchmark metadata, verdict normalization, and run artifact identifiers
 - canonical benchmark dataset ingestion for APPS-style JSONL records
 - a multi-language benchmark execution path for Python and JavaScript canonical benchmark records
 - phase-aware benchmark execution contracts that now model compile and run phases explicitly
+- a local compiled-language benchmark path for Java plus explicit C++ toolchain-error reporting
 - a typed vendor-native benchmark runtime boundary with fixture-driven submission and polling lifecycle coverage
 - focused tests for the bootstrap and API layers
 
 The repository does not yet implement the full paper runtime. The current API can run up to the configured turn budget with deterministic or checkpoint-backed topology revision, and the repository now emits benchmark-aligned evaluation artifacts. Local evaluation still defaults to repository-local harness adapters, while the vendor-native runtime boundary is currently verified through fixture-driven stubs rather than a live external service.
+
+Current strict-reproduction claim: `approximate reproduction`
+
+See [docs/reproduction.md](/D:/code/PaperCreate/AgentConductor/docs/reproduction.md) for the line-item fidelity checklist and the current blockers to an exact paper-level claim.
 
 ## Current Status
 
@@ -44,7 +50,10 @@ Completed milestones:
 - `EVAL-01`: JSON-backed batch evaluation pipeline that records per-problem outcomes and aggregate summaries
 - `TRAIN-01`: synthetic topology dataset generation plus a reproducible SFT baseline artifact path
 - `TRAIN-02`: checkpoint-producing supervised training path with YAML targets and loadable checkpoint metadata
+- `TRAIN-03`: paper-oriented synthetic YAML-topology SFT corpus expansion with dataset sidecar metadata, auditable optimizer or tokenizer provenance, and explicit reduced-scale labeling
 - `ORCH-03`: checkpoint-backed frozen inference wiring for the online solve loop and learned planning entrypoints
+- `ORCH-04`: repository-local checkpoint bundle loading for frozen orchestrator inference with explicit runtime-artifact validation
+- `EXEC-02`: model-backed non-testing worker runtime seam with per-agent runtime or model provenance
 - `RL-01`: repository-local reward breakdown and RL-style rollout artifact generation
 - `RL-02`: checkpoint-updating RL path with grouped rollout artifacts, lightweight GRPO-style update summaries, and loadable updated checkpoint metadata
 - `EVAL-02`: benchmark-aligned frozen-inference evaluation with structured per-attempt artifacts, dataset or harness provenance, and pass@1 or pass@k aggregates
@@ -53,12 +62,22 @@ Completed milestones:
 - `BENCH-03`: concrete Python benchmark execution path over canonical benchmark records
 - `BENCH-04`: multi-language benchmark execution dispatch for Python and JavaScript records, plus stricter stdin script fidelity
 - `BENCH-05`: phase-aware benchmark execution contracts for compiled-language compile or run settings and diagnostics
+- `BENCH-06`: local compiled-language benchmark harness with Java compile-then-run execution and explicit C++ toolchain diagnostics
 - `BENCH-07`: typed vendor-native benchmark runtime boundary with submission receipt, poll history, and artifact provenance
 
 Not yet implemented:
 
-- a local compiled-language harness for the first C++ or Java benchmark paths
+- a repository-bundled C++ toolchain path in environments where `g++` is unavailable
 - exact paper-scale checkpoint training or benchmark leaderboard reproduction
+
+Current exact-reproduction blockers recorded in `docs/reproduction.md`:
+
+- paper-fidelity worker agents and retriever fidelity
+- paper-scale SFT and RL training fidelity
+- benchmark-grade checkpoint-backed frozen inference instead of the current repository-local bundle runtime
+- full paper benchmark dataset coverage
+- live vendor-native benchmark runtime fidelity
+- stable compiled-language coverage across hosts
 
 ## Project Layout
 
@@ -80,6 +99,7 @@ Key locations:
 - `docs/tech.md`: architecture and verification rules
 - `docs/tasks.md`: task cards and current task status
 - `docs/Paper.md`: implementation-oriented paper distillation
+- `docs/reproduction.md`: exact-vs-approximate reproduction checklist and blockers
 - `use.md`: root-level usage guide for common repository workflows
 - `README_ZH.md`: Chinese overview of the current repository state
 - `src/agentconductor/domain/`: typed core contracts
@@ -212,15 +232,16 @@ repository-local templates. When a policy is passed, `solve_problem(...)` and
 `revise_problem_topology_candidate(...)` expose the raw YAML candidate plus the
 parsed `TopologyPlan`.
 When `orchestrator_checkpoint` is passed instead, the same learned path is
-loaded from explicit checkpoint metadata. The current repository runtime uses a
-lightweight mock frozen policy over that checkpoint boundary, so checkpoint
-selection and failure handling are exercised even before real model serving is
-wired in.
+loaded from explicit checkpoint metadata plus a checkpoint-owned runtime
+artifact. The current repository runtime is still a local substitute rather
+than benchmark-grade Qwen serving, but it now loads serialized frozen-inference
+state instead of falling back to metadata-only mock behavior.
 
 The execution API can return a typed `TopologyExecutionResult` with:
 
 - per-step and per-agent structured outputs
 - resolved upstream references for each agent
+- per-agent worker runtime and model identifiers for non-testing roles
 - final candidate code
 - judge outcome and diagnostics
 
@@ -276,13 +297,20 @@ uv run python -m agentconductor.interfaces.evaluation --dataset .\tests\fixtures
 
 The evaluation dataset must be a supported canonical benchmark source such as
 APPS-style JSONL. The generated artifact records dataset version, harness
-version, runtime mode, checkpoint id, per-attempt outcomes, and aggregate
-metrics including `pass@1` and `pass@k`.
+version, runtime mode, checkpoint id, reproduction claim, exact-reproduction
+readiness, per-attempt outcomes, and aggregate metrics including `pass@1` and
+`pass@k`.
+
+Write the current reproduction audit artifact:
+
+```powershell
+uv run python -m agentconductor.interfaces.reproduction --output .\artifacts\reproduction-audit.json
+```
 
 Generate synthetic SFT data and run the checkpoint-producing SFT path:
 
 ```powershell
-uv run python -m agentconductor.interfaces.training --dataset .\artifacts\sft-dataset.jsonl --artifact .\artifacts\sft-run.json
+uv run python -m agentconductor.interfaces.training --dataset .\artifacts\sft-dataset.jsonl --artifact .\artifacts\sft-run.json --sample-count 4500
 ```
 
 Inspect the generated checkpoint metadata:
@@ -317,8 +345,12 @@ uv run python -m agentconductor.interfaces.rl --dataset .\artifacts\sft-dataset.
 
 - The package keeps paper-method logic, application orchestration, and interfaces separated.
 - The first API is intentionally narrow. It is a stable Python boundary, not an HTTP service.
-- The executor remains deterministic for planning and worker-role behavior, but
-  its testing role now evaluates candidate code through a local subprocess judge adapter.
+- The executor now routes non-testing worker roles through an explicit
+  model-backed runtime seam. The default runtime is repository-local and uses
+  `gpt-4o-mini-compatible-stub` model identifiers as a paper-facing placeholder
+  rather than claiming real provider execution.
+- The testing role still evaluates candidate code through a local subprocess
+  judge adapter instead of letting worker models self-grade.
 - The subprocess judge is concrete but still approximate. It runs Python candidates
   against explicit test cases, expected outputs, typed per-case verdicts, and
   explicit CPU, wall-clock, and memory limits.
@@ -353,15 +385,21 @@ uv run python -m agentconductor.interfaces.rl --dataset .\artifacts\sft-dataset.
   `PythonBenchmarkJudgeAdapter`, `NodeJsBenchmarkJudgeAdapter`, and
   `MultiLanguageBenchmarkJudgeAdapter` that run those records through the
   benchmark adapter boundary.
-- The current benchmark runtime supports Python and JavaScript. Function-style
-  records execute through language-aware call boundaries, while stdin-style
-  records now run as standalone scripts with benchmark-owned stdin payloads.
+- The current benchmark runtime supports Python, JavaScript, and Java locally.
+  Function-style records execute through language-aware call boundaries for
+  Python and JavaScript, while stdin-style records run as standalone scripts
+  or local compile-then-run harnesses with benchmark-owned stdin payloads.
 - Benchmark execution settings can now also carry explicit compile and run
   phase contracts for compiled-language records, including source layout,
   command templates, executable targets, and per-phase resource limits.
 - Benchmark result artifacts now preserve typed per-phase diagnostics and
   artifact identifiers so compile failures and run-time failures stay
   distinguishable in later evaluation or vendor-runtime reporting.
+- The first compiled-language local harness is Java. It expects a host-local
+  `javac` plus `java` toolchain and currently supports stdin-style records.
+- The C++ local adapter is also wired into the benchmark seam, but if `g++`
+  is unavailable on the host it returns an explicit adapter error rather than
+  silently skipping execution.
 - The JavaScript function path accepts CommonJS exports and also applies a
   narrow repository compatibility shim for top-level `solve(...)` definitions;
   that shim is an implementation inference rather than a benchmark-native rule.
@@ -375,25 +413,30 @@ uv run python -m agentconductor.interfaces.rl --dataset .\artifacts\sft-dataset.
   boundary with inspectable worker count, retry count, and collection timeout.
 - Benchmark-aligned evaluation artifacts now record per-attempt solve
   outcomes, benchmark verdicts, latency, dataset version, harness version,
-  runtime mode, and aggregate pass metrics so later comparisons do not depend
-  on ad hoc log parsing.
+  runtime mode, reproduction claim, exact-reproduction readiness, and
+  aggregate pass metrics so later comparisons do not depend on ad hoc log
+  parsing.
 - The current evaluation path computes repository-observed `pass@k` from
   structured repeated attempts over canonical benchmark records.
 - The SFT path now writes both canonical mapping targets and YAML topology
-  targets, plus an explicit training-manifest file and loadable checkpoint
-  metadata.
+  targets, plus explicit source-dataset sidecar metadata, a training-manifest
+  file, and loadable checkpoint metadata.
+- The default SFT dataset generator now prepares a paper-oriented synthetic
+  YAML corpus of 4,500 samples and records difficulty breakdown, source recipe,
+  prompt-template version, and reduced-scale status in a sidecar metadata file.
 - The generated checkpoint artifact is repository-local and lightweight. It
-  makes dataset provenance, prompt-template version, backbone name, tokenizer
-  name, seed, and checkpoint location explicit, but it does not claim paper-scale
-  fine-tuning fidelity by itself.
+  now makes sample count, source dataset metadata path, source recipe,
+  optimizer name, prompt-template version, backbone name, tokenizer name,
+  seed, and checkpoint location explicit, but it still does not claim exact
+  paper-scale fine-tuning fidelity by itself.
 - Checkpoint-backed frozen inference now resolves one checkpoint explicitly from
   a checkpoint directory, metadata file, or training artifact. If a directory
   contains multiple candidates, callers must pass `orchestrator_checkpoint_id`
   instead of relying on filesystem order.
-- The current checkpoint-backed runtime is still a repository-local mock path.
-  It supports `device="cpu"` only, expects tokenizer compatibility to match the
-  checkpoint metadata, and keeps memory expectations low because it does not yet
-  load real model weights into an accelerator runtime.
+- The current checkpoint-backed runtime now loads a repository-local
+  `orchestrator-runtime.json` bundle from checkpoint metadata. It supports
+  `device="cpu"` only and keeps explicit checks for runtime-artifact presence,
+  prompt-template compatibility, and supported-device selection.
 - The RL path now consumes an explicit source checkpoint, collects rollout
   records through the bounded solve loop, computes grouped advantages, and
   writes an updated checkpoint plus rollout manifest artifacts.
@@ -408,12 +451,15 @@ uv run python -m agentconductor.interfaces.rl --dataset .\artifacts\sft-dataset.
   and JavaScript harness adapters. Reported metrics should therefore be treated
   as benchmark-aligned rather than exact leaderboard claims unless callers
   intentionally route through a configured vendor-native adapter.
+- The repository now also exposes a dedicated reproduction-audit artifact path
+  so future agents have one stable place to inspect the remaining exact
+  reproduction blockers.
 - When behavior is inferred rather than stated by the paper, the repository documents that explicitly.
 
 ## Next Likely Steps
 
 - extend benchmark dataset normalization beyond APPS-style JSONL sources
-- add the first local compiled-language benchmark harness on top of the new phase-aware benchmark contract
-- replace the mock checkpoint runtime with real checkpoint-backed model inference
+- extend the compiled-language local harness beyond the current Java-first path, especially for C++ on hosts with an available toolchain
+- replace the repository-local checkpoint bundle runtime with benchmark-grade model inference
 - replace the lightweight GRPO-style stub updater with a fuller paper-aligned RL optimizer
 - replace the fixture-driven vendor-native benchmark stub with a real external runtime integration where licensing and authentication permit it

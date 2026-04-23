@@ -67,7 +67,7 @@ def test_run_benchmark_evaluation_entrypoint_writes_summary_artifact(
         + "\n",
         encoding="utf-8",
     )
-    generate_sft_dataset_entrypoint(sft_dataset_path)
+    generate_sft_dataset_entrypoint(sft_dataset_path, sample_count=9)
     sft_artifact = run_sft_baseline_entrypoint(
         sft_dataset_path,
         sft_artifact_path,
@@ -126,6 +126,9 @@ def test_run_benchmark_evaluation_entrypoint_writes_summary_artifact(
     assert artifact.metadata.checkpoint_id == sft_artifact.checkpoint_id
     assert artifact.metadata.dataset_version.startswith("sha256:")
     assert artifact.metadata.runtime_mode == "local_harness"
+    assert artifact.metadata.reproduction_claim == "approximate"
+    assert artifact.metadata.exact_reproduction_ready is False
+    assert "benchmark-runtime" in artifact.metadata.blocking_gap_ids
     assert artifact.summary.problem_count == 1
     assert artifact.summary.attempt_count == 2
     assert artifact.summary.benchmark_completed_count == 2
@@ -138,6 +141,7 @@ def test_run_benchmark_evaluation_entrypoint_writes_summary_artifact(
     assert Path(artifact.results[1].result_artifact_uri).exists()
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["metadata"]["checkpoint_id"] == sft_artifact.checkpoint_id
+    assert payload["metadata"]["reproduction_claim"] == "approximate"
     assert payload["summary"]["pass_at_1"] == 0.0
     assert payload["summary"]["pass_at_k"] == 1.0
 

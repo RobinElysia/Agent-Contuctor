@@ -837,7 +837,7 @@ Out of scope:
 - leaderboard aggregation
 
 ### Task ID: BENCH-06
-Status: todo
+Status: done
 Depends on: BENCH-05
 Scope: add a local compiled-language benchmark harness for the first paper-relevant C++ and Java execution paths
 Files:
@@ -1002,7 +1002,7 @@ Out of scope:
 - paper-writing or claims generation
 
 ### Task ID: REPRO-01
-Status: todo
+Status: done
 Depends on: BENCH-07, EVAL-02
 Scope: close the remaining fidelity gaps required for exact paper-style benchmark reproduction and leaderboard comparison
 Files:
@@ -1013,6 +1013,11 @@ Files:
 - implementation files touched by any remaining gap
 - `tests/` if targeted verification is added
 Implementation notes:
+- execution steps used for this task:
+  - audit the implemented topology, inference, training, benchmark, and evaluation paths against `docs/Paper.md`
+  - convert the remaining fidelity gaps into a line-item typed reproduction checklist
+  - expose the current exact-vs-approximate reproduction claim through evaluation metadata and a dedicated audit artifact
+  - document the final blockers in one durable location for later agents
 - audit the implemented training, inference, judge, and dataset paths against the paper's reported setup and record a concrete gap list
 - identify whether exact reproduction is blocked by unavailable data, proprietary harness details, missing language support, or intentionally reduced-scale training
 - only promote a reproduction claim when every blocking gap is either closed or explicitly justified with evidence
@@ -1025,4 +1030,141 @@ Acceptance criteria:
 Out of scope:
 - inventing new research directions beyond the paper
 - production deployment hardening
+- unrelated API expansion
+
+### Task ID: EXEC-02
+Status: done
+Depends on: ORCH-03
+Scope: replace deterministic repository-local worker handlers with a model-backed worker-agent runtime closer to the paper's execution path
+Files:
+- `src/agentconductor/application/execution.py`
+- `src/agentconductor/domain/execution.py`
+- `src/agentconductor/infrastructure/`
+- `src/agentconductor/interfaces/`
+- `tests/`
+- `docs/Paper.md`
+- `README.md`
+Implementation notes:
+- keep the role registry boundary explicit, but let retrieval, planning, algorithmic, coding, and debugging roles call model-backed adapters instead of deterministic string templates
+- preserve the testing role as a separate evaluation boundary rather than letting worker models self-grade without an explicit judge path
+- record which worker runtime and model identifiers were used so later evaluation artifacts can audit worker-agent fidelity
+- treat the paper's `gpt-4o-mini` worker stack as the target fidelity reference, but document any temporary fallback if the exact provider or model name is unavailable
+Acceptance criteria:
+- the repository can execute one topology turn through model-backed non-testing worker roles behind explicit infrastructure adapters
+- execution artifacts record which worker model or runtime produced each role output
+- tests or smoke verification cover one model-backed worker execution path plus one adapter-failure path
+- docs explain how this runtime differs from the earlier deterministic worker baseline when exact paper fidelity is still incomplete
+Out of scope:
+- replacing benchmark runtime adapters
+- orchestrator training
+- production multi-tenant serving
+
+### Task ID: RETR-01
+Status: todo
+Depends on: EXEC-02
+Scope: add a retriever-backed retrieval role closer to the paper's E5-style retrieval path
+Files:
+- `src/agentconductor/application/execution.py`
+- `src/agentconductor/domain/`
+- `src/agentconductor/infrastructure/`
+- `tests/`
+- `docs/Paper.md`
+- `README.md`
+Implementation notes:
+- current repository priority note:
+  - under the repository's current `RL + LLM` task-orchestration goal, this
+    task is optional and may be deferred until the orchestrator SFT and RL
+    path are stronger
+- keep retriever construction and corpus access inside infrastructure adapters instead of embedding retrieval logic in the role handler
+- treat the paper's E5-based retrieval as the target fidelity reference and make any embedding-model or corpus substitutions explicit in docs and artifacts
+- preserve a typed retrieval-result contract so later worker prompts can consume retrieved context without depending on raw provider payloads
+Acceptance criteria:
+- the retrieval role can call a retriever adapter and return typed retrieval results rather than heuristic prompt-token summaries
+- retrieval artifacts or diagnostics preserve retriever identifier and corpus provenance
+- tests or smoke verification cover one successful retrieval path and one missing-corpus or adapter-failure path
+- docs explain the remaining gap, if any, between the implemented retriever and the paper's stated E5 setup
+Out of scope:
+- full benchmark ingestion for every external corpus
+- worker-model selection for non-retrieval roles
+- leaderboard evaluation
+
+### Task ID: ORCH-04
+Status: done
+Depends on: TRAIN-02
+Scope: replace the current mock checkpoint policy with real checkpoint-backed frozen orchestrator inference
+Files:
+- `src/agentconductor/application/orchestrator.py`
+- `src/agentconductor/domain/orchestration.py`
+- `src/agentconductor/infrastructure/`
+- `src/agentconductor/interfaces/`
+- `tests/`
+- `API.md`
+- `README.md`
+Implementation notes:
+- keep checkpoint discovery and metadata parsing separate from model-loading and token-generation logic
+- load actual checkpoint artifacts for the orchestrator path instead of treating `weights.stub` plus metadata as sufficient runtime state
+- preserve explicit failure modes for missing weights, incompatible tokenizer or prompt template, and unsupported device/runtime combinations
+- document whether the implementation reaches exact `Qwen2.5-3B-Instruct` fidelity or a justified substitute
+Acceptance criteria:
+- `solve_problem(...)`, `plan_problem_topology_candidate(...)`, and revision entrypoints can generate topology YAML from a real checkpoint-backed runtime
+- checkpoint artifacts contain enough information to load real runtime state rather than only placeholder metadata
+- tests or smoke verification cover one real checkpoint-backed generation path and one checkpoint-load failure path
+- docs explain runtime requirements, supported devices, and any remaining gap relative to the paper's orchestrator backbone
+Out of scope:
+- worker-agent execution models
+- RL optimization logic
+- external benchmark services
+
+### Task ID: TRAIN-03
+Status: done
+Depends on: TOP-02
+Scope: move the SFT path from a repository-local baseline artifact flow toward the paper's synthetic YAML-topology training setup
+Files:
+- `src/agentconductor/application/training.py`
+- `src/agentconductor/domain/training.py`
+- `src/agentconductor/infrastructure/`
+- `src/agentconductor/interfaces/training.py`
+- `tests/`
+- `docs/Paper.md`
+- `README.md`
+Implementation notes:
+- preserve the separation between source dataset, prepared manifest, and checkpoint metadata
+- expand the SFT path toward the paper's 4,500-sample synthetic-topology setup and record clearly when the repository still uses a reduced-scale subset
+- make prompt-template versioning, tokenizer choice, and backbone name explicit and auditable in produced artifacts
+- avoid silently calling the resulting checkpoint "paper-scale" unless the dataset size and training recipe actually match the documented target
+Acceptance criteria:
+- the repository can prepare and train against a larger paper-oriented synthetic YAML-topology corpus rather than only the current minimal baseline set
+- training artifacts record sample count, backbone, tokenizer, prompt template, and enough provenance to compare against the paper setup
+- tests or smoke verification cover dataset preparation and checkpoint artifact production for the expanded SFT path
+- docs explain which pieces now match the paper setup exactly and which remain approximations
+Out of scope:
+- RL training
+- benchmark evaluation
+- production distributed training orchestration
+
+### Task ID: RL-03
+Status: todo
+Depends on: TRAIN-03, ORCH-04
+Scope: replace the current GRPO-shaped stub with a paper-aligned RL optimization path over topology-generation rollouts
+Files:
+- `src/agentconductor/application/rl.py`
+- `src/agentconductor/domain/rl.py`
+- `src/agentconductor/infrastructure/`
+- `src/agentconductor/interfaces/rl.py`
+- `tests/`
+- `docs/Paper.md`
+- `README.md`
+Implementation notes:
+- keep rollout collection, reward computation, grouped advantage calculation, and checkpoint updates as separate inspectable stages
+- align the optimizer configuration with the paper's GRPO setup, including documented group size and multi-turn rollout semantics
+- preserve explicit reward provenance so YAML-validity, execution, and density contributions stay auditable
+- do not present the path as paper-faithful if it still relies on local shortcuts such as single-process updates or reduced rollout scale
+Acceptance criteria:
+- the RL path can optimize an orchestrator checkpoint through a paper-oriented grouped rollout update flow rather than the current stub summary
+- RL artifacts preserve rollout records, grouped update metadata, and updated checkpoint provenance
+- tests or smoke verification cover grouped rollout processing and one updated-checkpoint path
+- docs explain what now matches the paper's RL design and what remains a reduced-scale approximation if any
+Out of scope:
+- benchmark vendor runtime integration
+- worker-agent retrieval corpora
 - unrelated API expansion

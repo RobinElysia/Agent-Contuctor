@@ -71,7 +71,7 @@ def test_run_rl_baseline_entrypoint_writes_updated_checkpoint_artifact(
     dataset_path = tmp_path / "sft.jsonl"
     sft_artifact_path = tmp_path / "artifacts" / "sft.json"
     rl_artifact_path = tmp_path / "artifacts" / "rl.json"
-    generate_sft_dataset_entrypoint(dataset_path)
+    generate_sft_dataset_entrypoint(dataset_path, sample_count=9)
     sft_artifact = run_sft_baseline_entrypoint(dataset_path, sft_artifact_path, seed=7)
 
     def fake_solve_problem(
@@ -168,4 +168,6 @@ def test_run_rl_baseline_entrypoint_writes_updated_checkpoint_artifact(
     assert updated_checkpoint.parent_checkpoint_id == sft_artifact.checkpoint_id
     assert updated_checkpoint.average_reward == artifact.average_reward
     assert updated_checkpoint.optimizer_name == "grpo-stub"
+    assert updated_checkpoint.runtime_artifact_path is not None
+    assert Path(updated_checkpoint.runtime_artifact_path).exists()
     assert Path(artifact.rollout_manifest_path).exists()

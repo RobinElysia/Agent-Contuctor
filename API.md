@@ -7,7 +7,7 @@ The API is still in an early milestone. It currently provides:
 - a typed solve entrypoint with bounded multi-turn execution over explicit orchestrator modes
 - a typed multi-turn solve-state contract that records per-turn history
 - deterministic and learned-policy topology-planning entrypoints
-- a single-turn topology-execution entrypoint backed by a local subprocess judge adapter
+- a single-turn topology-execution entrypoint whose non-testing worker roles can run through a model-backed runtime seam and whose testing role is backed by a local subprocess judge adapter
 - typed topology schema objects for single-turn plans
 - validation rules for topology structure before execution
 
@@ -31,6 +31,9 @@ Stable callable API:
 - `agentconductor.evaluate_candidate_batch`
 - `agentconductor.run_benchmark_evaluation_entrypoint`
 - `agentconductor.run_batch_evaluation_entrypoint`
+- `agentconductor.build_reproduction_audit`
+- `agentconductor.write_reproduction_audit`
+- `agentconductor.write_reproduction_audit_entrypoint`
 - `agentconductor.generate_sft_dataset_entrypoint`
 - `agentconductor.load_sft_checkpoint_entrypoint`
 - `agentconductor.run_sft_baseline_entrypoint`
@@ -86,6 +89,10 @@ Other public types:
 - `agentconductor.EvaluationRunArtifact`
 - `agentconductor.EvaluationRunMetadata`
 - `agentconductor.EvaluationSummary`
+- `agentconductor.ReproductionAudit`
+- `agentconductor.ReproductionChecklistItem`
+- `agentconductor.ReproductionClaim`
+- `agentconductor.ReproductionStatus`
 - `agentconductor.ExecutionStatus`
 - `agentconductor.RewardBreakdown`
 - `agentconductor.TestingOutcome`
@@ -101,6 +108,8 @@ Other public types:
 - `agentconductor.PythonSubprocessJudgeAdapter`
 - `agentconductor.PythonSubprocessSandboxAdapter`
 - `agentconductor.NodeJsBenchmarkJudgeAdapter`
+- `agentconductor.CppBenchmarkJudgeAdapter`
+- `agentconductor.JavaBenchmarkJudgeAdapter`
 - `agentconductor.PythonBenchmarkJudgeAdapter`
 - `agentconductor.MultiLanguageBenchmarkJudgeAdapter`
 - `agentconductor.StubBenchmarkAdapter`
@@ -134,6 +143,13 @@ Other public types:
 - `agentconductor.SyntheticTopologySample`
 - `agentconductor.RlTrainingArtifact`
 - `agentconductor.RlTrainingConfig`
+- `agentconductor.RepositoryFrozenOrchestratorBundle`
+- `agentconductor.RepositoryFrozenOrchestratorRuntime`
+- `agentconductor.RepositoryWorkerModelRuntime`
+- `agentconductor.WorkerGenerationRequest`
+- `agentconductor.WorkerGenerationResult`
+- `agentconductor.WorkerRoleRuntime`
+- `agentconductor.WorkerRuntimeError`
 
 ## Installation and Import
 
@@ -162,7 +178,7 @@ from agentconductor import (
 
 ## Solve API
 
-### `solve_problem(problem, *, max_turns=None, orchestrator_policy=None, orchestrator_checkpoint=None, orchestrator_checkpoint_id=None, orchestrator_device="cpu", orchestrator_max_attempts=1) -> SolveResult`
+### `solve_problem(problem, *, max_turns=None, orchestrator_policy=None, orchestrator_checkpoint=None, orchestrator_checkpoint_id=None, orchestrator_device="cpu", orchestrator_max_attempts=1, worker_runtime=None) -> SolveResult`
 
 Plan and execute a structured bounded multi-turn solve for a problem instance.
 
@@ -175,6 +191,7 @@ Parameters:
 - `orchestrator_checkpoint_id: str | None = None`
 - `orchestrator_device: str = "cpu"`
 - `orchestrator_max_attempts: int = 1`
+- `worker_runtime: WorkerRoleRuntime | None = None`
 
 Behavior:
 
@@ -187,6 +204,7 @@ Behavior:
   metadata when `orchestrator_checkpoint` is provided
 - executes plan -> evaluate in a bounded loop up to the current turn budget
 - consumes typed prior-turn testing feedback when planning a later turn
+- routes non-testing worker roles through the provided `worker_runtime` or the default repository-local model-backed worker runtime
 - returns the final candidate code, role trace, and final testing outcome
 
 Returned `SolveResult` fields:
@@ -207,9 +225,9 @@ Implementation inference:
 
 - the medium-difficulty fallback is an engineering inference until the repository implements the paper's real difficulty inference mechanism
 - deterministic planning remains the repository-local fallback when no learned policy is configured
-- the current checkpoint-backed frozen path uses a repository-local mock policy
-  behind explicit checkpoint-loading and selection boundaries rather than
-  loading benchmark-grade model weights directly
+- the current checkpoint-backed frozen path loads a repository-local runtime
+  bundle from checkpoint metadata, with explicit load failures for missing
+  runtime artifacts, unsupported devices, or incompatible prompt templates
 
 The `notes` field records which orchestrator mode produced the final topology
 and, when relevant, which checkpoint-backed runtime was selected.
@@ -290,7 +308,7 @@ Implementation inference:
 
 ## Topology Execution API
 
-### `execute_topology_plan(problem, topology) -> TopologyExecutionResult`
+### `execute_topology_plan(problem, topology, *, sandbox=None, worker_runtime=None) -> TopologyExecutionResult`
 
 Execute a validated single-turn topology plan layer by layer.
 
@@ -299,15 +317,17 @@ Behavior:
 - validates the topology before execution
 - executes steps in index order
 - resolves references only from prior executed steps
-- dispatches each agent through a deterministic role registry
+- dispatches each non-testing agent through a model-backed worker runtime seam
 - extracts the last referenced candidate code through an explicit code-candidate contract
 - evaluates candidate code through a concrete judge adapter
 - returns structured per-agent outputs, final candidate code, judge diagnostics, and final testing outcome
 
 Implementation inference:
 
-- the current role registry uses deterministic non-testing worker handlers, while
-  the testing role delegates to a repository-local Python subprocess judge
+- the current default worker runtime is `RepositoryWorkerModelRuntime`, which
+  records runtime and model identifiers per agent while remaining a
+  repository-local substitute for real `gpt-4o-mini` execution
+- the testing role delegates to a repository-local Python subprocess judge
 - the local judge validates a Python `solve()` entrypoint against explicit test
   cases, expected outputs, and explicit resource limits until a fuller benchmark
   integration exists
@@ -410,7 +430,7 @@ Current scope and limits:
 - the repository now exposes a typed benchmark adapter seam plus one canonical dataset-ingestion path for APPS-style JSONL artifacts
 - the included `StubBenchmarkAdapter` is only for contract verification and fixture-driven tests
 - the local subprocess judge remains the explicit development fallback for current solve execution
-- the repository now includes concrete Python and Node.js benchmark execution adapters plus a multi-language dispatch adapter, and it also exposes a separate stubbed vendor-native runtime boundary for submission-lifecycle verification
+- the repository now includes concrete Python, Node.js, and Java benchmark execution adapters plus a multi-language dispatch adapter, and it also exposes a separate stubbed vendor-native runtime boundary for submission-lifecycle verification
 
 ### `load_canonical_benchmark_dataset(dataset_path, *, source_format=BenchmarkDatasetFormat.APPS_JSONL) -> CanonicalBenchmarkDataset`
 
@@ -450,7 +470,7 @@ Current scope and limits:
 - only APPS-style JSONL ingestion is wired in this milestone
 - the repository does not bundle benchmark payloads and assumes the caller has legitimate local access to the source artifact
 - some APPS rows may still load as metadata-only records when they do not include executable `input_output` payloads
-- compiled-language local harness execution is still a later milestone even though the benchmark contract now carries explicit compile or run phase settings
+- the first compiled-language local harness is now Java-first and stdin-oriented; wider compiled-language coverage still depends on host toolchain availability
 
 ### `evaluate_candidate_against_benchmark_record(record, candidate, *, adapter) -> BenchmarkEvaluationResult`
 
@@ -478,8 +498,14 @@ Current concrete benchmark paths:
   Evaluates JavaScript benchmark records through local Node.js execution and
   emits benchmark-style verdict strings such as `accepted` and
   `compilation_error`.
+- `JavaBenchmarkJudgeAdapter`
+  Compiles and executes stdin-style Java benchmark records through local
+  `javac` plus `java`, while preserving compile-phase and run-phase artifacts.
+- `CppBenchmarkJudgeAdapter`
+  Uses the same compile-then-run benchmark seam for C++ records and reports an
+  explicit adapter error when the required compiler is unavailable.
 - `MultiLanguageBenchmarkJudgeAdapter`
-  Dispatches to the configured Python or Node.js benchmark harness based on the
+  Dispatches to the configured Python, Node.js, C++, or Java benchmark harness based on the
   canonical record's `BenchmarkExecutionSettings.language`.
 - `StubVendorNativeBenchmarkAdapter`
   Exercises a vendor-native benchmark lifecycle through typed submission
@@ -490,7 +516,12 @@ Current fidelity limits:
 
 - Python and JavaScript function-style invocation is closest to benchmark semantics when `fn_name` is available
 - stdin-style Python and JavaScript execution now runs the candidate as a standalone script with benchmark-owned stdin payloads
+- stdin-style Java execution now runs through a local compile-then-run harness
+  when `javac` and `java` are available
 - the JavaScript function path expects a CommonJS export and adds a repository-local compatibility shim for top-level `solve(...)` definitions
+- local compiled-language coverage is still incomplete: Java is the first
+  repository-local compiled harness, while C++ depends on host-local `g++`
+  availability and currently has no bundled fallback toolchain
 - local harness artifact capture is file-based and now also preserves typed
   per-phase compile or run artifact identifiers
 - real vendor-native integrations still depend on external authentication,
@@ -559,8 +590,9 @@ def generate_topology_candidate(
 ) -> str: ...
 ```
 
-Repository-local mock policies are supported for tests and frozen-inference
-wiring when a real checkpoint is unavailable.
+Repository-local mock policies are still supported for tests, but checkpoint
+loading now also supports a repository-local frozen runtime bundle that
+materializes topology YAML candidates from serialized checkpoint state.
 
 Checkpoint-backed frozen inference keeps explicit failure boundaries:
 
@@ -650,7 +682,8 @@ Behavior:
 - writes per-attempt results that preserve solve status, benchmark verdict,
   latency, topology size, benchmark artifact identifiers, and checkpoint id
 - writes run metadata including dataset version, harness version, runtime mode,
-  checkpoint provenance, and aggregate `pass@1` / `pass@k`
+  checkpoint provenance, reproduction claim, exact-reproduction readiness,
+  blocking gap ids, and aggregate `pass@1` / `pass@k`
 
 Current fidelity note:
 
@@ -661,13 +694,35 @@ Current fidelity note:
   the bundled verification path is still the fixture-driven
   `StubVendorNativeBenchmarkAdapter` rather than a live service integration
 
+## Reproduction Audit API
+
+### `build_reproduction_audit() -> ReproductionAudit`
+
+Return the repository's current strict paper-reproduction checklist as a typed
+in-memory object.
+
+Behavior:
+
+- records the current overall claim as `exact` or `approximate`
+- lists line-item fidelity items with explicit `exact`, `approximate`, or
+  `blocked` status
+- returns the current blocking gap ids needed for a strict paper-level claim
+
+### `write_reproduction_audit(output_path) -> ReproductionAudit`
+
+Write the same reproduction audit to a JSON artifact.
+
+### `write_reproduction_audit_entrypoint(output_path) -> ReproductionAudit`
+
+Public path-normalizing wrapper for the same audit artifact.
+
 ### `run_batch_evaluation_entrypoint(...) -> EvaluationRunArtifact`
 
 Compatibility alias for `run_benchmark_evaluation_entrypoint(...)`.
 
 ## SFT Baseline API
 
-### `generate_sft_dataset_entrypoint(dataset_path) -> tuple[SyntheticTopologySample, ...]`
+### `generate_sft_dataset_entrypoint(dataset_path, *, sample_count=4500, seed=0, prompt_template_version="orchestrator-sft-v2", source_recipe_name="paper-oriented-synthetic-yaml-v1") -> tuple[SyntheticTopologySample, ...]`
 
 Generate a deterministic JSONL dataset of schema-valid topology targets derived
 from the current rule-based orchestrator.
@@ -679,8 +734,12 @@ Current transport note:
 - the stored topology mapping now comes from the canonical
   `TopologyPlan.to_mapping()` transport shape rather than a training-local
   serializer
+- the generator also writes a sidecar metadata file at
+  `<dataset>.metadata.json` that records sample count, paper target size,
+  difficulty breakdown, source recipe, prompt-template version, and reduced-scale
+  status
 
-### `run_sft_baseline_entrypoint(dataset_path, artifact_path, *, epochs=1, learning_rate=1e-4, seed=0, backbone_name=\"Qwen2.5-3B-Instruct\", tokenizer_name=\"Qwen2.5-3B-Instruct\", prompt_template_version=\"orchestrator-sft-v1\") -> SftTrainingArtifact`
+### `run_sft_baseline_entrypoint(dataset_path, artifact_path, *, epochs=1, learning_rate=1e-4, seed=0, backbone_name=\"Qwen2.5-3B-Instruct\", tokenizer_name=\"Qwen2.5-3B-Instruct\", prompt_template_version=\"orchestrator-sft-v2\", optimizer_name=\"adamw\") -> SftTrainingArtifact`
 
 Validate the generated dataset and write a reproducible checkpoint-producing
 artifact for the repository-local SFT stage.
@@ -689,9 +748,11 @@ Behavior:
 
 - validates that `target_topology` and `target_topology_yaml` stay in sync
 - writes a YAML-target training manifest distinct from the source dataset
-- emits a lightweight checkpoint directory with loadable metadata
-- records dataset provenance, backbone, tokenizer, prompt-template version,
-  seed, and checkpoint location in the artifact
+- emits a lightweight checkpoint directory with loadable metadata plus a
+  repository-local `orchestrator-runtime.json` bundle for frozen inference
+- records dataset provenance, source dataset metadata path, source recipe,
+  sample count, reduced-scale label, optimizer name, backbone, tokenizer,
+  prompt-template version, seed, and checkpoint location in the artifact
 
 ### `load_sft_checkpoint_entrypoint(checkpoint_path) -> OrchestratorCheckpointMetadata`
 
@@ -723,8 +784,8 @@ Behavior:
 - preserves per-rollout execution outcomes, YAML-derived topology artifacts,
   reward breakdowns, and the resulting checkpoint identifier
 - computes grouped advantages as a lightweight GRPO-style update summary
-- writes a new checkpoint directory with updated metadata and a stubbed weight
-  lineage marker
+- writes a new checkpoint directory with updated metadata, copied runtime
+  bundle state when available, and a stubbed weight lineage marker
 - returns a typed artifact that points to both the rollout manifest and the
   updated checkpoint
 
@@ -963,6 +1024,7 @@ It currently does:
 - emit learned-policy topology candidates for first-turn and later-turn planning
 - resolve lightweight orchestrator checkpoints into the online solve loop and
   learned planning entrypoints
+- execute non-testing worker roles through a typed worker-runtime adapter seam
 - execute single-turn topologies with a local judge-backed testing role
 - run a bounded multi-turn solve loop with early stop on pass
 - produce lightweight loadable SFT checkpoint artifacts with explicit metadata

@@ -157,6 +157,7 @@ def write_rl_checkpoint(
     """Write the updated repository-local checkpoint metadata and stub weights."""
     checkpoint_dir = artifact_path.with_name(f"{artifact_path.stem}-checkpoint")
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    runtime_artifact_path = checkpoint_dir / "orchestrator-runtime.json"
     source_weights = Path(source_checkpoint.checkpoint_path) / "weights.stub"
     target_weights = checkpoint_dir / "weights.stub"
     if source_weights.exists():
@@ -175,6 +176,10 @@ def write_rl_checkpoint(
         ),
         encoding="utf-8",
     )
+    if source_checkpoint.runtime_artifact_path is not None:
+        source_runtime_artifact = Path(source_checkpoint.runtime_artifact_path)
+        if source_runtime_artifact.exists():
+            copyfile(source_runtime_artifact, runtime_artifact_path)
 
     metadata = OrchestratorCheckpointMetadata(
         checkpoint_id=update_summary.resulting_checkpoint_id,
@@ -195,6 +200,13 @@ def write_rl_checkpoint(
         optimizer_name=update_summary.optimizer_name,
         optimizer_steps=update_summary.optimizer_steps,
         average_reward=update_summary.average_reward,
+        runtime_kind=source_checkpoint.runtime_kind,
+        runtime_artifact_path=(
+            str(runtime_artifact_path)
+            if runtime_artifact_path.exists()
+            else source_checkpoint.runtime_artifact_path
+        ),
+        weights_path=str(target_weights),
     )
     write_orchestrator_checkpoint_metadata(checkpoint_dir, metadata)
     return metadata

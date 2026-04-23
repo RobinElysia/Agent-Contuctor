@@ -21,15 +21,22 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--learning-rate", type=float, default=1e-4)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--sample-count", type=int, default=4500)
     parser.add_argument("--backbone-name", default="Qwen2.5-3B-Instruct")
     parser.add_argument("--tokenizer-name", default="Qwen2.5-3B-Instruct")
-    parser.add_argument("--prompt-template-version", default="orchestrator-sft-v1")
+    parser.add_argument("--prompt-template-version", default="orchestrator-sft-v2")
+    parser.add_argument("--optimizer-name", default="adamw")
     args = parser.parse_args()
 
     if args.load_checkpoint:
         print(load_sft_checkpoint_entrypoint(args.load_checkpoint))
         return
-    generate_sft_dataset_entrypoint(args.dataset)
+    generate_sft_dataset_entrypoint(
+        args.dataset,
+        sample_count=args.sample_count,
+        seed=args.seed,
+        prompt_template_version=args.prompt_template_version,
+    )
     if args.generate_only:
         return
     if not args.artifact:
@@ -43,4 +50,5 @@ def main() -> None:
         backbone_name=args.backbone_name,
         tokenizer_name=args.tokenizer_name,
         prompt_template_version=args.prompt_template_version,
+        optimizer_name=args.optimizer_name,
     )

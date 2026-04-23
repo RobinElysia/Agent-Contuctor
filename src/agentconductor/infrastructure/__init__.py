@@ -1,6 +1,8 @@
 """Infrastructure adapters for AgentConductor."""
 
 from agentconductor.infrastructure.benchmark import (
+    CppBenchmarkJudgeAdapter,
+    JavaBenchmarkJudgeAdapter,
     MultiLanguageBenchmarkJudgeAdapter,
     NodeJsBenchmarkJudgeAdapter,
     PythonBenchmarkJudgeAdapter,
@@ -26,6 +28,8 @@ from agentconductor.infrastructure.topology_yaml import (
 __all__ = [
     "PythonSubprocessJudgeAdapter",
     "PythonSubprocessSandboxAdapter",
+    "CppBenchmarkJudgeAdapter",
+    "JavaBenchmarkJudgeAdapter",
     "NodeJsBenchmarkJudgeAdapter",
     "PythonBenchmarkJudgeAdapter",
     "MultiLanguageBenchmarkJudgeAdapter",

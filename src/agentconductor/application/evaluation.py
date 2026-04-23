@@ -15,6 +15,7 @@ from agentconductor.application.benchmark import (
     evaluate_candidate_with_benchmark_record,
     load_benchmark_dataset,
 )
+from agentconductor.application.reproduction import build_reproduction_audit
 from agentconductor.domain.benchmark import (
     BenchmarkAdapter,
     BenchmarkDatasetFormat,
@@ -432,6 +433,7 @@ def _build_run_metadata(
     orchestrator_device: str,
     notes: tuple[str, ...],
 ) -> EvaluationRunMetadata:
+    reproduction_audit = build_reproduction_audit()
     problem_splits = {
         record.problem.split_name for record in dataset.records if record.problem.split_name is not None
     }
@@ -447,6 +449,9 @@ def _build_run_metadata(
         checkpoint_id=checkpoint_metadata.checkpoint_id,
         checkpoint_path=checkpoint_metadata.checkpoint_path,
         checkpoint_training_stage=checkpoint_metadata.training_stage,
+        reproduction_claim=reproduction_audit.overall_claim.value,
+        exact_reproduction_ready=reproduction_audit.exact_reproduction_ready,
+        blocking_gap_ids=reproduction_audit.blocking_gap_ids,
         split_name=split_name,
         samples_per_problem=samples_per_problem,
         max_turns=max_turns,

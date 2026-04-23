@@ -21,7 +21,12 @@ from agentconductor.domain.execution import (
 )
 from agentconductor.domain.models import ProblemInstance
 from agentconductor.domain.topology import AgentInvocation, AgentReference, AgentRole, TopologyPlan
+from agentconductor.domain.worker_runtime import (
+    WorkerGenerationRequest,
+    WorkerRoleRuntime,
+)
 from agentconductor.infrastructure.sandbox import PythonSubprocessJudgeAdapter
+from agentconductor.infrastructure.worker_runtime import RepositoryWorkerModelRuntime
 
 RoleHandler = Callable[
     [ProblemInstance, AgentInvocation, int, tuple[ResolvedAgentOutput, ...]],
@@ -35,10 +40,14 @@ def execute_topology(
     *,
     registry: dict[AgentRole, RoleHandler] | None = None,
     sandbox: SandboxAdapter | None = None,
+    worker_runtime: WorkerRoleRuntime | None = None,
 ) -> TopologyExecutionResult:
     """Execute a single-turn topology plan layer by layer."""
     topology.validate()
-    active_registry = registry or build_default_role_registry(sandbox=sandbox)
+    active_registry = registry or build_default_role_registry(
+        sandbox=sandbox,
+        worker_runtime=worker_runtime,
+    )
 
     results_by_agent: dict[tuple[int, str], AgentExecutionResult] = {}
     step_results: list[StepExecutionResult] = []
@@ -88,15 +97,47 @@ def execute_topology(
 def build_default_role_registry(
     *,
     sandbox: SandboxAdapter | None = None,
+    worker_runtime: WorkerRoleRuntime | None = None,
 ) -> dict[AgentRole, RoleHandler]:
-    """Return the deterministic role registry used by the executor."""
+    """Return the default execution registry for model-backed worker roles."""
     active_sandbox = sandbox or PythonSubprocessJudgeAdapter()
+    active_worker_runtime = worker_runtime or RepositoryWorkerModelRuntime()
     return {
-        AgentRole.RETRIEVAL: _run_retrieval_role,
-        AgentRole.PLANNING: _run_planning_role,
-        AgentRole.ALGORITHMIC: _run_algorithmic_role,
-        AgentRole.CODING: _run_coding_role,
-        AgentRole.DEBUGGING: _run_debugging_role,
+        AgentRole.RETRIEVAL: lambda problem, agent, step_index, consumed_outputs: _run_model_backed_role(
+            problem,
+            agent,
+            step_index,
+            consumed_outputs,
+            worker_runtime=active_worker_runtime,
+        ),
+        AgentRole.PLANNING: lambda problem, agent, step_index, consumed_outputs: _run_model_backed_role(
+            problem,
+            agent,
+            step_index,
+            consumed_outputs,
+            worker_runtime=active_worker_runtime,
+        ),
+        AgentRole.ALGORITHMIC: lambda problem, agent, step_index, consumed_outputs: _run_model_backed_role(
+            problem,
+            agent,
+            step_index,
+            consumed_outputs,
+            worker_runtime=active_worker_runtime,
+        ),
+        AgentRole.CODING: lambda problem, agent, step_index, consumed_outputs: _run_model_backed_role(
+            problem,
+            agent,
+            step_index,
+            consumed_outputs,
+            worker_runtime=active_worker_runtime,
+        ),
+        AgentRole.DEBUGGING: lambda problem, agent, step_index, consumed_outputs: _run_model_backed_role(
+            problem,
+            agent,
+            step_index,
+            consumed_outputs,
+            worker_runtime=active_worker_runtime,
+        ),
         AgentRole.TESTING: lambda problem, agent, step_index, consumed_outputs: _run_testing_role(
             problem,
             agent,
@@ -149,117 +190,40 @@ def _select_final_testing_result(
     return None
 
 
-def _run_retrieval_role(
+def _run_model_backed_role(
     problem: ProblemInstance,
     agent: AgentInvocation,
     step_index: int,
     consumed_outputs: tuple[ResolvedAgentOutput, ...],
+    *,
+    worker_runtime: WorkerRoleRuntime,
 ) -> AgentExecutionResult:
-    del consumed_outputs
-    focus = _extract_focus(problem.prompt)
-    summary = f"Retrieved deterministic context focused on {focus}."
+    prompt = build_worker_prompt(
+        problem,
+        agent,
+        step_index,
+        consumed_outputs,
+    )
+    response = worker_runtime.generate_role_output(
+        WorkerGenerationRequest(
+            problem=problem,
+            agent=agent,
+            step_index=step_index,
+            consumed_outputs=consumed_outputs,
+            prompt=prompt,
+        )
+    )
     return AgentExecutionResult(
         step_index=step_index,
         agent_name=agent.name,
         role=agent.role,
-        summary=summary,
-        references=agent.refs,
-    )
-
-
-def _run_planning_role(
-    problem: ProblemInstance,
-    agent: AgentInvocation,
-    step_index: int,
-    consumed_outputs: tuple[ResolvedAgentOutput, ...],
-) -> AgentExecutionResult:
-    planning_steps = (
-        "analyze the problem statement",
-        "choose a candidate algorithm",
-        "prepare a testable implementation",
-    )
-    if consumed_outputs:
-        planning_steps = planning_steps + ("integrate referenced context",)
-    summary = "Plan: " + "; ".join(planning_steps) + "."
-    return AgentExecutionResult(
-        step_index=step_index,
-        agent_name=agent.name,
-        role=agent.role,
-        summary=summary,
+        summary=response.summary,
         references=agent.refs,
         consumed_outputs=consumed_outputs,
-    )
-
-
-def _run_algorithmic_role(
-    problem: ProblemInstance,
-    agent: AgentInvocation,
-    step_index: int,
-    consumed_outputs: tuple[ResolvedAgentOutput, ...],
-) -> AgentExecutionResult:
-    del problem
-    ref_summary = _format_reference_names(consumed_outputs)
-    summary = f"Algorithmic decomposition prepared from {ref_summary}."
-    return AgentExecutionResult(
-        step_index=step_index,
-        agent_name=agent.name,
-        role=agent.role,
-        summary=summary,
-        references=agent.refs,
-        consumed_outputs=consumed_outputs,
-    )
-
-
-def _run_coding_role(
-    problem: ProblemInstance,
-    agent: AgentInvocation,
-    step_index: int,
-    consumed_outputs: tuple[ResolvedAgentOutput, ...],
-) -> AgentExecutionResult:
-    focus = _extract_focus(problem.prompt)
-    ref_summary = _format_reference_names(consumed_outputs)
-    candidate_code = (
-        f"def solve() -> str:\n"
-        f"    \"\"\"Deterministic candidate for {problem.identifier}.\"\"\"\n"
-        f"    return \"{focus} solved\"\n"
-    )
-    return AgentExecutionResult(
-        step_index=step_index,
-        agent_name=agent.name,
-        role=agent.role,
-        summary=f"Candidate code drafted from {ref_summary}.",
-        references=agent.refs,
-        consumed_outputs=consumed_outputs,
-        candidate_code=candidate_code,
-    )
-
-
-def _run_debugging_role(
-    problem: ProblemInstance,
-    agent: AgentInvocation,
-    step_index: int,
-    consumed_outputs: tuple[ResolvedAgentOutput, ...],
-) -> AgentExecutionResult:
-    del problem
-    referenced_code = next(
-        (output.candidate_code for output in reversed(consumed_outputs) if output.candidate_code),
-        None,
-    )
-    diagnostics = ("Checked edge cases and failure modes.",)
-    candidate_code = None
-    if referenced_code is not None:
-        candidate_code = referenced_code + "    # Debugger review: deterministic sanity checks applied.\n"
-        diagnostics = diagnostics + ("Revised the referenced candidate code.",)
-
-    return AgentExecutionResult(
-        step_index=step_index,
-        agent_name=agent.name,
-        role=agent.role,
-        summary="Debugging review completed.",
-        references=agent.refs,
-        consumed_outputs=consumed_outputs,
-        candidate_code=candidate_code,
-        diagnostics=diagnostics,
+        candidate_code=response.candidate_code,
+        diagnostics=response.diagnostics,
+        worker_runtime=response.runtime_name,
+        worker_model=response.model_name,
     )
 
 
@@ -312,6 +276,42 @@ def _extract_focus(prompt: str) -> str:
         token for token in prompt_tokens if token and token not in {"the", "a", "an", "and", "or", "to"}
     ]
     return meaningful_tokens[0] if meaningful_tokens else "problem"
+
+
+def build_worker_prompt(
+    problem: ProblemInstance,
+    agent: AgentInvocation,
+    step_index: int,
+    consumed_outputs: tuple[ResolvedAgentOutput, ...],
+) -> str:
+    """Build the explicit prompt sent to one non-testing worker runtime."""
+    sections = [
+        "You are a worker agent in AgentConductor.",
+        f"Role: {agent.role.value}",
+        f"Problem id: {problem.identifier}",
+        f"Step index: {step_index}",
+        "Problem prompt:",
+        problem.prompt,
+    ]
+    if consumed_outputs:
+        sections.extend(
+            [
+                "Referenced upstream outputs:",
+                "\n".join(
+                    f"- {output.agent_name} ({output.role.value}): {output.summary}"
+                    for output in consumed_outputs
+                ),
+            ]
+        )
+    else:
+        sections.append("Referenced upstream outputs: none")
+    if agent.role is AgentRole.CODING:
+        sections.append("Return candidate Python code suitable for the testing role.")
+    elif agent.role is AgentRole.DEBUGGING:
+        sections.append("Revise any referenced candidate code when needed.")
+    else:
+        sections.append("Return a concise structured summary for this role.")
+    return "\n".join(sections)
 
 
 def build_judge_test_spec(problem: ProblemInstance) -> SandboxTestSpec:

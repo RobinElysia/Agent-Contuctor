@@ -83,6 +83,8 @@ from agentconductor.domain.rl import (
 )
 from agentconductor.domain.training import (
     OrchestratorCheckpointMetadata,
+    SftDatasetConfig,
+    SftDatasetMetadata,
     SftTrainingArtifact,
     SftTrainingConfig,
     SyntheticTopologySample,
@@ -157,6 +159,8 @@ __all__ = [
     "TopologySchemaError",
     "TopologyStep",
     "TopologyValidationError",
+    "SftDatasetConfig",
+    "SftDatasetMetadata",
     "SftTrainingArtifact",
     "SftTrainingConfig",
     "SyntheticTopologySample",
