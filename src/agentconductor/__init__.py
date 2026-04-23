@@ -21,6 +21,8 @@ from agentconductor.application.rl import (
 from agentconductor.application.training import (
     generate_sft_dataset,
     generate_sft_dataset_entrypoint,
+    load_sft_checkpoint,
+    load_sft_checkpoint_entrypoint,
     run_sft_baseline,
     run_sft_baseline_entrypoint,
 )
@@ -52,7 +54,13 @@ from agentconductor.domain.evaluation import (
     EvaluationRunArtifact,
     EvaluationSummary,
 )
-from agentconductor.domain.rl import RewardBreakdown, RlTrainingArtifact, RlTrainingConfig
+from agentconductor.domain.rl import (
+    RewardBreakdown,
+    RlPolicyUpdateSummary,
+    RlRolloutRecord,
+    RlTrainingArtifact,
+    RlTrainingConfig,
+)
 from agentconductor.domain.execution import (
     AgentExecutionResult,
     CodeCandidate,
@@ -90,6 +98,9 @@ from agentconductor.domain.models import (
 )
 from agentconductor.domain.orchestration import (
     LearnedTopologyPlan,
+    OrchestratorCheckpointError,
+    OrchestratorCheckpointLoadError,
+    OrchestratorCheckpointSelectionError,
     OrchestratorMode,
     OrchestratorPromptRequest,
     TopologyCandidateExtractionError,
@@ -107,6 +118,7 @@ from agentconductor.domain.topology import (
     TopologyValidationError,
 )
 from agentconductor.domain.training import (
+    OrchestratorCheckpointMetadata,
     SftTrainingArtifact,
     SftTrainingConfig,
     SyntheticTopologySample,
@@ -173,6 +185,10 @@ __all__ = [
     "JudgeResourceLimits",
     "LearnedTopologyPlan",
     "JudgeTestCase",
+    "OrchestratorCheckpointMetadata",
+    "OrchestratorCheckpointError",
+    "OrchestratorCheckpointLoadError",
+    "OrchestratorCheckpointSelectionError",
     "ProblemInstance",
     "OrchestratorMode",
     "OrchestratorPromptRequest",
@@ -183,6 +199,8 @@ __all__ = [
     "PythonSubprocessSandboxAdapter",
     "RewardBreakdown",
     "ResolvedAgentOutput",
+    "RlPolicyUpdateSummary",
+    "RlRolloutRecord",
     "RlTrainingArtifact",
     "RlTrainingConfig",
     "SandboxAdapter",
@@ -230,6 +248,8 @@ __all__ = [
     "execute_topology_plan",
     "generate_sft_dataset",
     "generate_sft_dataset_entrypoint",
+    "load_sft_checkpoint",
+    "load_sft_checkpoint_entrypoint",
     "load_benchmark_dataset",
     "load_benchmark_dataset_entrypoint",
     "load_canonical_benchmark_dataset",

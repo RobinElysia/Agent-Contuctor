@@ -57,6 +57,19 @@ from agentconductor.domain.topology import (
     TopologyStep,
     TopologyValidationError,
 )
+from agentconductor.domain.rl import (
+    RewardBreakdown,
+    RlPolicyUpdateSummary,
+    RlRolloutRecord,
+    RlTrainingArtifact,
+    RlTrainingConfig,
+)
+from agentconductor.domain.training import (
+    OrchestratorCheckpointMetadata,
+    SftTrainingArtifact,
+    SftTrainingConfig,
+    SyntheticTopologySample,
+)
 
 __all__ = [
     "AgentExecutionResult",
@@ -81,10 +94,16 @@ __all__ = [
     "JudgeCaseResult",
     "JudgeResourceLimits",
     "LearnedTopologyPlan",
+    "OrchestratorCheckpointMetadata",
     "OrchestratorMode",
     "OrchestratorPromptRequest",
     "JudgeTestCase",
+    "RewardBreakdown",
     "ResolvedAgentOutput",
+    "RlPolicyUpdateSummary",
+    "RlRolloutRecord",
+    "RlTrainingArtifact",
+    "RlTrainingConfig",
     "SandboxAdapter",
     "SandboxExecutionResult",
     "SandboxTestSpec",
@@ -106,4 +125,7 @@ __all__ = [
     "TopologySchemaError",
     "TopologyStep",
     "TopologyValidationError",
+    "SftTrainingArtifact",
+    "SftTrainingConfig",
+    "SyntheticTopologySample",
 ]

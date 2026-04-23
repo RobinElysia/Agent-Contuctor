@@ -8,9 +8,12 @@ from agentconductor import (
     AgentReference,
     DifficultyLevel,
     ExecutionStatus,
+    generate_sft_dataset_entrypoint,
     LearnedTopologyPlan,
+    OrchestratorCheckpointSelectionError,
     ProblemInstance,
     TopologyLogicError,
+    run_sft_baseline_entrypoint,
     SolveStatus,
     StopReason,
     StepExecutionResult,
@@ -482,3 +485,109 @@ steps:
         TopologyPromptKind.INITIAL,
         TopologyPromptKind.REVISION,
     ]
+
+
+def test_solve_problem_can_use_checkpoint_backed_frozen_inference(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    dataset_path = tmp_path / "sft-dataset.jsonl"
+    artifact_path = tmp_path / "sft-run.json"
+    generate_sft_dataset_entrypoint(dataset_path)
+    run_sft_baseline_entrypoint(dataset_path, artifact_path)
+
+    def fake_execute(problem: ProblemInstance, topology: TopologyPlan) -> TopologyExecutionResult:
+        if topology.steps[-1].agents[0].name == "tester_2":
+            return TopologyExecutionResult(
+                problem=problem,
+                difficulty=DifficultyLevel.EASY,
+                status=ExecutionStatus.COMPLETED,
+                step_results=(
+                    StepExecutionResult(
+                        step_index=2,
+                        agent_results=(
+                            AgentExecutionResult(
+                                step_index=2,
+                                agent_name="tester_2",
+                                role=AgentRole.TESTING,
+                                summary="First checkpoint-backed attempt failed.",
+                                references=(),
+                                candidate_code="def solve():\n    return 'wrong'\n",
+                                diagnostics=("Wrong answer on sample.",),
+                                testing_outcome=TestingOutcome.FAILED,
+                            ),
+                        ),
+                    ),
+                ),
+                final_candidate_code="def solve():\n    return 'wrong'\n",
+                testing_outcome=TestingOutcome.FAILED,
+                diagnostics=("Wrong answer on sample.",),
+            )
+
+        return TopologyExecutionResult(
+            problem=problem,
+            difficulty=DifficultyLevel.EASY,
+            status=ExecutionStatus.COMPLETED,
+            step_results=(
+                StepExecutionResult(
+                    step_index=3,
+                    agent_results=(
+                        AgentExecutionResult(
+                            step_index=3,
+                            agent_name="tester_t1_3",
+                            role=AgentRole.TESTING,
+                            summary="Checkpoint-backed revision passed.",
+                            references=(),
+                            candidate_code="def solve():\n    return 'fixed'\n",
+                            diagnostics=("Accepted after revision.",),
+                            testing_outcome=TestingOutcome.PASSED,
+                        ),
+                    ),
+                ),
+            ),
+            final_candidate_code="def solve():\n    return 'fixed'\n",
+            testing_outcome=TestingOutcome.PASSED,
+            diagnostics=("Accepted after revision.",),
+        )
+
+    monkeypatch.setattr(api_module, "execute_topology", fake_execute)
+
+    result = solve_problem(
+        ProblemInstance(
+            identifier="apps-checkpoint",
+            prompt="Fix the failing implementation.",
+            difficulty=DifficultyLevel.EASY,
+        ),
+        max_turns=2,
+        orchestrator_checkpoint=artifact_path,
+    )
+
+    assert result.status is SolveStatus.COMPLETED
+    assert result.solve_state.completed_turns == 2
+    assert result.topology.steps[-1].agents[0].name == "tester_t1_3"
+    assert result.notes[1] == "Topology planning mode: learned."
+    assert "Checkpoint-backed frozen inference uses" in result.notes[2]
+
+
+def test_solve_problem_checkpoint_directory_requires_explicit_selection_when_multiple_exist(
+    tmp_path,
+) -> None:
+    dataset_path = tmp_path / "sft-dataset.jsonl"
+    artifact_a = tmp_path / "sft-run-a.json"
+    artifact_b = tmp_path / "sft-run-b.json"
+    generate_sft_dataset_entrypoint(dataset_path)
+    run_sft_baseline_entrypoint(dataset_path, artifact_a, seed=0)
+    run_sft_baseline_entrypoint(dataset_path, artifact_b, seed=1)
+
+    with pytest.raises(
+        OrchestratorCheckpointSelectionError,
+        match="contains multiple checkpoint candidates",
+    ):
+        solve_problem(
+            ProblemInstance(
+                identifier="apps-ambiguous-checkpoint",
+                prompt="Solve the problem with a correct implementation.",
+                difficulty=DifficultyLevel.EASY,
+            ),
+            orchestrator_checkpoint=tmp_path,
+        )

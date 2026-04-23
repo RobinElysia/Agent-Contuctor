@@ -41,7 +41,10 @@ Completed milestones:
 - `DIST-01`: local distributed evaluation boundary for parallel candidate judging with explicit concurrency, retry, and collection-timeout controls
 - `EVAL-01`: JSON-backed batch evaluation pipeline that records per-problem outcomes and aggregate summaries
 - `TRAIN-01`: synthetic topology dataset generation plus a reproducible SFT baseline artifact path
+- `TRAIN-02`: checkpoint-producing supervised training path with YAML targets and loadable checkpoint metadata
+- `ORCH-03`: checkpoint-backed frozen inference wiring for the online solve loop and learned planning entrypoints
 - `RL-01`: repository-local reward breakdown and RL-style rollout artifact generation
+- `RL-02`: checkpoint-updating RL path with grouped rollout artifacts, lightweight GRPO-style update summaries, and loadable updated checkpoint metadata
 - `BENCH-01`: typed external benchmark adapter seam for execution metadata and verdict mapping
 - `BENCH-02`: canonical benchmark dataset ingestion and normalization for APPS-style JSONL artifacts
 - `BENCH-03`: concrete Python benchmark execution path over canonical benchmark records
@@ -112,7 +115,7 @@ agentconductor: roles=6, max_turns=2
 
 ## Python API
 
-The stable package entrypoints are `solve_problem(...)`, `plan_problem_topology(...)`, `plan_problem_topology_candidate(...)`, `revise_problem_topology_candidate(...)`, `execute_topology_plan(...)`, `serialize_topology_plan_to_yaml(...)`, and `parse_topology_plan_yaml(...)`.
+The stable package entrypoints are `solve_problem(...)`, `plan_problem_topology(...)`, `plan_problem_topology_candidate(...)`, `revise_problem_topology_candidate(...)`, `execute_topology_plan(...)`, `serialize_topology_plan_to_yaml(...)`, `parse_topology_plan_yaml(...)`, and `load_sft_checkpoint_entrypoint(...)`.
 
 ```python
 from agentconductor import (
@@ -151,6 +154,16 @@ candidate = plan_problem_topology_candidate(
     orchestrator_policy=my_policy,  # implements TopologyOrchestratorPolicy
 )
 
+checkpoint_result = solve_problem(
+    ProblemInstance(
+        identifier="apps-checkpoint",
+        prompt="Fix the failing implementation.",
+        difficulty=DifficultyLevel.EASY,
+    ),
+    max_turns=2,
+    orchestrator_checkpoint="artifacts/sft-run.json",
+)
+
 execution = execute_topology_plan(
     ProblemInstance(
         identifier="apps-two-sum",
@@ -172,6 +185,7 @@ print(result.testing_outcome)
 print(result.solve_state.completed_turns)
 print(execution.testing_outcome)
 print(candidate.topology_yaml)
+print(checkpoint_result.notes[2])
 ```
 
 The planning API can return a typed `TopologyPlan`, and `solve_problem(...)` now returns a typed `SolveResult` that includes:
@@ -192,6 +206,11 @@ repository-local templates. When a policy is passed, `solve_problem(...)` and
 `plan_problem_topology_candidate(...)` and
 `revise_problem_topology_candidate(...)` expose the raw YAML candidate plus the
 parsed `TopologyPlan`.
+When `orchestrator_checkpoint` is passed instead, the same learned path is
+loaded from explicit checkpoint metadata. The current repository runtime uses a
+lightweight mock frozen policy over that checkpoint boundary, so checkpoint
+selection and failure handling are exercised even before real model serving is
+wired in.
 
 The execution API can return a typed `TopologyExecutionResult` with:
 
@@ -253,16 +272,38 @@ uv run python -m agentconductor.interfaces.evaluation --dataset .\examples\eval-
 The dataset JSON must contain a `problems` list with `identifier`, `prompt`,
 and optional `difficulty` fields.
 
-Generate synthetic SFT data and run the baseline artifact path:
+Generate synthetic SFT data and run the checkpoint-producing SFT path:
 
 ```powershell
 uv run python -m agentconductor.interfaces.training --dataset .\artifacts\sft-dataset.jsonl --artifact .\artifacts\sft-run.json
 ```
 
-Run the repository-local RL baseline over that dataset:
+Inspect the generated checkpoint metadata:
 
 ```powershell
-uv run python -m agentconductor.interfaces.rl --dataset .\artifacts\sft-dataset.jsonl --artifact .\artifacts\rl-run.json --rollouts 2
+uv run python -m agentconductor.interfaces.training --dataset .\artifacts\sft-dataset.jsonl --load-checkpoint .\artifacts\sft-run-checkpoint
+```
+
+Run a solve request through checkpoint-backed frozen inference:
+
+```python
+from agentconductor import DifficultyLevel, ProblemInstance, solve_problem
+
+result = solve_problem(
+    ProblemInstance(
+        identifier="apps-checkpoint",
+        prompt="Fix the failing implementation.",
+        difficulty=DifficultyLevel.EASY,
+    ),
+    max_turns=2,
+    orchestrator_checkpoint="artifacts/sft-run.json",
+)
+```
+
+Run the repository-local RL checkpoint-optimization path over that dataset:
+
+```powershell
+uv run python -m agentconductor.interfaces.rl --dataset .\artifacts\sft-dataset.jsonl --artifact .\artifacts\rl-run.json --checkpoint .\artifacts\sft-run.json --rollout-count 4 --group-size 2
 ```
 
 ## Design Notes
@@ -321,17 +362,32 @@ uv run python -m agentconductor.interfaces.rl --dataset .\artifacts\sft-dataset.
   boundary with inspectable worker count, retry count, and collection timeout.
 - Batch evaluation artifacts record per-problem solve outcomes, latency, and
   topology metadata so later training analysis can reuse them.
-- The SFT baseline materializes schema-valid synthetic topology data and writes
-  a reproducible training artifact, but it does not fine-tune a large model.
-- The synthetic `target_topology` payload now reuses the same canonical
-  `TopologyPlan.to_mapping()` transport shape that backs the YAML path, so
-  training fixtures do not maintain a separate topology serializer.
-- The RL baseline computes inspectable reward breakdowns and rollout artifacts
-  using repository-local approximations of the paper's reward terms.
+- The SFT path now writes both canonical mapping targets and YAML topology
+  targets, plus an explicit training-manifest file and loadable checkpoint
+  metadata.
+- The generated checkpoint artifact is repository-local and lightweight. It
+  makes dataset provenance, prompt-template version, backbone name, tokenizer
+  name, seed, and checkpoint location explicit, but it does not claim paper-scale
+  fine-tuning fidelity by itself.
+- Checkpoint-backed frozen inference now resolves one checkpoint explicitly from
+  a checkpoint directory, metadata file, or training artifact. If a directory
+  contains multiple candidates, callers must pass `orchestrator_checkpoint_id`
+  instead of relying on filesystem order.
+- The current checkpoint-backed runtime is still a repository-local mock path.
+  It supports `device="cpu"` only, expects tokenizer compatibility to match the
+  checkpoint metadata, and keeps memory expectations low because it does not yet
+  load real model weights into an accelerator runtime.
+- The RL path now consumes an explicit source checkpoint, collects rollout
+  records through the bounded solve loop, computes grouped advantages, and
+  writes an updated checkpoint plus rollout manifest artifacts.
+- The current RL optimizer is still a repository-local GRPO-shaped stub. It
+  makes rollout rewards, checkpoint lineage, and update scale explicit, but it
+  does not claim paper-scale distributed training fidelity.
 - When behavior is inferred rather than stated by the paper, the repository documents that explicitly.
 
 ## Next Likely Steps
 
 - extend benchmark dataset normalization beyond APPS-style JSONL sources
 - extend benchmark execution beyond the current Python and JavaScript local harnesses, especially for compiled-language and vendor-native runtimes
-- extend checkpoint-producing SFT and frozen-inference orchestration paths
+- replace the mock checkpoint runtime with real checkpoint-backed model inference
+- replace the lightweight GRPO-style stub updater with a fuller paper-aligned RL optimizer

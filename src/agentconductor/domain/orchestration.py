@@ -61,6 +61,18 @@ class TopologyCandidateExtractionError(OrchestratorPolicyError):
     """Raised when a policy response does not contain an extractable YAML plan."""
 
 
+class OrchestratorCheckpointError(RuntimeError):
+    """Base class for checkpoint-backed orchestrator configuration failures."""
+
+
+class OrchestratorCheckpointSelectionError(OrchestratorCheckpointError):
+    """Raised when a checkpoint source cannot be resolved unambiguously."""
+
+
+class OrchestratorCheckpointLoadError(OrchestratorCheckpointError):
+    """Raised when a resolved checkpoint cannot support frozen inference."""
+
+
 @runtime_checkable
 class TopologyOrchestratorPolicy(Protocol):
     """Minimal policy contract for frozen-orchestrator planning."""
@@ -72,4 +84,3 @@ class TopologyOrchestratorPolicy(Protocol):
         request: OrchestratorPromptRequest,
     ) -> str:
         """Return one raw model response containing a topology YAML candidate."""
-

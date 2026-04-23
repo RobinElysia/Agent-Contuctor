@@ -893,7 +893,7 @@ Out of scope:
 - paper-level result claims by itself
 
 ### Task ID: TRAIN-02
-Status: todo
+Status: done
 Depends on: TOP-02, ORCH-02, BENCH-02, TRAIN-01
 Scope: replace the repository-local SFT artifact baseline with checkpoint-producing supervised training for the orchestrator
 Files:
@@ -921,7 +921,7 @@ Out of scope:
 - production deployment of trained checkpoints
 
 ### Task ID: RL-02
-Status: todo
+Status: done
 Depends on: TRAIN-02, BENCH-03, RL-01
 Scope: replace the repository-local RL baseline with a checkpoint-updating policy-optimization path aligned with the paper's GRPO stage
 Files:
@@ -949,7 +949,7 @@ Out of scope:
 - production serving
 
 ### Task ID: ORCH-03
-Status: todo
+Status: done
 Depends on: TRAIN-02, ORCH-02
 Scope: load trained orchestrator checkpoints into the online solve loop for frozen multi-turn inference
 Files:

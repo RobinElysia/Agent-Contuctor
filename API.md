@@ -31,6 +31,7 @@ Stable callable API:
 - `agentconductor.evaluate_candidate_batch`
 - `agentconductor.run_batch_evaluation_entrypoint`
 - `agentconductor.generate_sft_dataset_entrypoint`
+- `agentconductor.load_sft_checkpoint_entrypoint`
 - `agentconductor.run_sft_baseline_entrypoint`
 - `agentconductor.compute_reward_breakdown_entrypoint`
 - `agentconductor.run_rl_baseline_entrypoint`
@@ -105,6 +106,10 @@ Other public types:
 - `agentconductor.SolveResult`
 - `agentconductor.SolveStatus`
 - `agentconductor.LearnedTopologyPlan`
+- `agentconductor.OrchestratorCheckpointMetadata`
+- `agentconductor.OrchestratorCheckpointError`
+- `agentconductor.OrchestratorCheckpointSelectionError`
+- `agentconductor.OrchestratorCheckpointLoadError`
 - `agentconductor.OrchestratorMode`
 - `agentconductor.OrchestratorPromptRequest`
 - `agentconductor.TopologyOrchestratorPolicy`
@@ -143,7 +148,7 @@ from agentconductor import (
 
 ## Solve API
 
-### `solve_problem(problem, *, max_turns=None, orchestrator_policy=None, orchestrator_max_attempts=1) -> SolveResult`
+### `solve_problem(problem, *, max_turns=None, orchestrator_policy=None, orchestrator_checkpoint=None, orchestrator_checkpoint_id=None, orchestrator_device="cpu", orchestrator_max_attempts=1) -> SolveResult`
 
 Plan and execute a structured bounded multi-turn solve for a problem instance.
 
@@ -152,6 +157,9 @@ Parameters:
 - `problem: ProblemInstance`
 - `max_turns: int | None = None`
 - `orchestrator_policy: TopologyOrchestratorPolicy | None = None`
+- `orchestrator_checkpoint: str | Path | None = None`
+- `orchestrator_checkpoint_id: str | None = None`
+- `orchestrator_device: str = "cpu"`
 - `orchestrator_max_attempts: int = 1`
 
 Behavior:
@@ -161,6 +169,8 @@ Behavior:
 - validates the turn budget against the current baseline limit
 - uses deterministic planning when no orchestrator policy is provided
 - uses the learned YAML planning path when `orchestrator_policy` is provided
+- can also resolve the learned YAML planning path from explicit checkpoint
+  metadata when `orchestrator_checkpoint` is provided
 - executes plan -> evaluate in a bounded loop up to the current turn budget
 - consumes typed prior-turn testing feedback when planning a later turn
 - returns the final candidate code, role trace, and final testing outcome
@@ -183,8 +193,12 @@ Implementation inference:
 
 - the medium-difficulty fallback is an engineering inference until the repository implements the paper's real difficulty inference mechanism
 - deterministic planning remains the repository-local fallback when no learned policy is configured
+- the current checkpoint-backed frozen path uses a repository-local mock policy
+  behind explicit checkpoint-loading and selection boundaries rather than
+  loading benchmark-grade model weights directly
 
-The `notes` field records which orchestrator mode produced the final topology.
+The `notes` field records which orchestrator mode produced the final topology
+and, when relevant, which checkpoint-backed runtime was selected.
 
 ## Multi-Turn Solve-State Contract
 
@@ -445,7 +459,7 @@ Current fidelity limits:
 
 ## Topology Planning API
 
-### `plan_problem_topology(problem, *, orchestrator_policy=None, orchestrator_max_attempts=1) -> TopologyPlan`
+### `plan_problem_topology(problem, *, orchestrator_policy=None, orchestrator_checkpoint=None, orchestrator_checkpoint_id=None, orchestrator_device="cpu", orchestrator_max_attempts=1) -> TopologyPlan`
 
 Return a validated topology plan for a problem instance.
 
@@ -456,6 +470,7 @@ Behavior:
 - infers a coarse local problem shape from prompt keywords
 - selects one of a small set of topology templates when no policy is provided
 - otherwise routes through the learned YAML planning boundary and validates the parsed result
+- can load that learned planning boundary from explicit checkpoint metadata
 - returns a validated single-turn `TopologyPlan`
 
 Implementation inference:
@@ -463,19 +478,20 @@ Implementation inference:
 - prompt-shape inference is a repository-local heuristic, not a paper-defined mechanism
 - deterministic planning remains the local fallback so tests and offline callers do not require a model checkpoint
 
-### `plan_problem_topology_candidate(problem, *, orchestrator_policy, orchestrator_max_attempts=1) -> LearnedTopologyPlan`
+### `plan_problem_topology_candidate(problem, *, orchestrator_policy=None, orchestrator_checkpoint=None, orchestrator_checkpoint_id=None, orchestrator_device="cpu", orchestrator_max_attempts=1) -> LearnedTopologyPlan`
 
 Return the raw learned-policy YAML candidate plus its parsed topology.
 
 Behavior:
 
 - constructs an explicit first-turn prompt from the problem and selected difficulty
-- calls the provided policy through the narrow `TopologyOrchestratorPolicy` boundary
+- calls the provided policy, or a checkpoint-backed loaded policy, through the
+  narrow `TopologyOrchestratorPolicy` boundary
 - extracts one repository YAML document from the raw response
 - parses the YAML through the existing transport and topology-validation path
 - retries failed extraction or validation attempts up to `orchestrator_max_attempts`
 
-### `revise_problem_topology_candidate(revision, *, orchestrator_policy, orchestrator_max_attempts=1) -> LearnedTopologyPlan`
+### `revise_problem_topology_candidate(revision, *, orchestrator_policy=None, orchestrator_checkpoint=None, orchestrator_checkpoint_id=None, orchestrator_device="cpu", orchestrator_max_attempts=1) -> LearnedTopologyPlan`
 
 Return the raw learned-policy revised YAML candidate plus its parsed topology.
 
@@ -483,7 +499,8 @@ Behavior:
 
 - consumes the existing `TopologyRevisionInput` contract rather than raw strings
 - includes prior topology YAML and testing feedback in the explicit revision prompt
-- uses the same extraction, parsing, and retry path as first-turn planning
+- uses the same extraction, parsing, and retry path as first-turn planning,
+  including the same checkpoint-backed policy path when configured
 
 ## Learned Orchestrator Contract
 
@@ -502,6 +519,14 @@ def generate_topology_candidate(
 
 Repository-local mock policies are supported for tests and frozen-inference
 wiring when a real checkpoint is unavailable.
+
+Checkpoint-backed frozen inference keeps explicit failure boundaries:
+
+- invalid checkpoint source selection raises `OrchestratorCheckpointSelectionError`
+- incompatible checkpoint metadata or missing runtime artifacts raises
+  `OrchestratorCheckpointLoadError`
+- there is no silent fallback to the deterministic planner after checkpoint
+  selection or loading fails
 
 ### `LearnedTopologyPlan`
 
@@ -587,31 +612,64 @@ from the current rule-based orchestrator.
 Current transport note:
 
 - `target_topology` remains JSON-serializable in the dataset artifact
-- the stored topology payload now comes from the canonical
+- `target_topology_yaml` now carries the YAML-form target used by the SFT path
+- the stored topology mapping now comes from the canonical
   `TopologyPlan.to_mapping()` transport shape rather than a training-local
   serializer
 
-### `run_sft_baseline_entrypoint(dataset_path, artifact_path, *, epochs=1, learning_rate=1e-4, seed=0) -> SftTrainingArtifact`
+### `run_sft_baseline_entrypoint(dataset_path, artifact_path, *, epochs=1, learning_rate=1e-4, seed=0, backbone_name=\"Qwen2.5-3B-Instruct\", tokenizer_name=\"Qwen2.5-3B-Instruct\", prompt_template_version=\"orchestrator-sft-v1\") -> SftTrainingArtifact`
 
-Validate the generated dataset and write a reproducible baseline artifact for
-the repository-local SFT stage.
+Validate the generated dataset and write a reproducible checkpoint-producing
+artifact for the repository-local SFT stage.
+
+Behavior:
+
+- validates that `target_topology` and `target_topology_yaml` stay in sync
+- writes a YAML-target training manifest distinct from the source dataset
+- emits a lightweight checkpoint directory with loadable metadata
+- records dataset provenance, backbone, tokenizer, prompt-template version,
+  seed, and checkpoint location in the artifact
+
+### `load_sft_checkpoint_entrypoint(checkpoint_path) -> OrchestratorCheckpointMetadata`
+
+Load repository-local checkpoint metadata from a checkpoint directory,
+metadata file, or training-artifact-derived checkpoint source.
 
 Implementation inference:
 
-- this stage materializes structured training data and configuration artifacts
-  but does not fine-tune the paper's full orchestrator backbone
+- this stage now emits checkpoint-shaped artifacts and loadable metadata, but it
+  still does not claim paper-scale supervised fine-tuning fidelity by itself
 
-## RL Baseline API
+## RL Training API
 
 ### `compute_reward_breakdown_entrypoint(topology, *, yaml_valid, execution_outcome) -> RewardBreakdown`
 
 Compute a repository-local reward breakdown from YAML validity, execution
 outcome, and topology-density signals.
 
-### `run_rl_baseline_entrypoint(dataset_path, artifact_path, *, rollouts=1, seed=0) -> RlTrainingArtifact`
+### `run_rl_baseline_entrypoint(dataset_path, artifact_path, *, checkpoint_source, rollout_count=4, group_size=2, turn_budget=2, seed=0, optimizer_learning_rate=1e-5, optimizer_name="grpo-stub", checkpoint_device="cpu") -> RlTrainingArtifact`
 
-Run a deterministic rollout loop over the SFT dataset and write per-rollout
-reward breakdowns plus an aggregate artifact.
+Run the repository-local RL training path from one source checkpoint and write
+rollout artifacts plus an updated checkpoint.
+
+Behavior:
+
+- resolves the source checkpoint from a checkpoint directory, metadata file, or
+  training artifact JSON
+- collects rollout records through the current bounded solve loop
+- preserves per-rollout execution outcomes, YAML-derived topology artifacts,
+  reward breakdowns, and the resulting checkpoint identifier
+- computes grouped advantages as a lightweight GRPO-style update summary
+- writes a new checkpoint directory with updated metadata and a stubbed weight
+  lineage marker
+- returns a typed artifact that points to both the rollout manifest and the
+  updated checkpoint
+
+Implementation inference:
+
+- this path is shaped like the paper's RL stage, but it still uses a
+  repository-local grouped-reward stub updater instead of claiming full GRPO
+  optimizer fidelity
 
 Implementation inference:
 
@@ -840,13 +898,16 @@ It currently does:
 - emit deterministic topology plans for supported difficulty tiers
 - emit deterministic revised topologies from prior-turn feedback
 - emit learned-policy topology candidates for first-turn and later-turn planning
+- resolve lightweight orchestrator checkpoints into the online solve loop and
+  learned planning entrypoints
 - execute single-turn topologies with a local judge-backed testing role
 - run a bounded multi-turn solve loop with early stop on pass
+- produce lightweight loadable SFT checkpoint artifacts with explicit metadata
 - return candidate code and structured execution traces from `solve_problem(...)`
 
 The repository currently does not:
 
-- load a real checkpoint-backed orchestrator inside the repository by default
+- load benchmark-grade model weights into a production inference runtime
 - claim benchmark-exact frozen inference semantics
 
 ## Source References

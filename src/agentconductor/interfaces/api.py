@@ -4,6 +4,8 @@ External callers should treat ``solve_problem`` as the stable entrypoint for
 problem-oriented execution requests during the current milestone.
 """
 
+from pathlib import Path
+
 from agentconductor.application.api import solve_request
 from agentconductor.application.bootstrap import bootstrap_overview
 from agentconductor.domain.history import TopologyRevisionInput
@@ -26,12 +28,18 @@ def solve_problem(
     *,
     max_turns: int | None = None,
     orchestrator_policy: TopologyOrchestratorPolicy | None = None,
+    orchestrator_checkpoint: str | Path | None = None,
+    orchestrator_checkpoint_id: str | None = None,
+    orchestrator_device: str = "cpu",
     orchestrator_max_attempts: int = 1,
 ) -> SolveResult:
     """Return a structured solve result for a problem instance."""
     return solve_request(
         SolveRequest(problem=problem, max_turns=max_turns),
         orchestrator_policy=orchestrator_policy,
+        orchestrator_checkpoint=orchestrator_checkpoint,
+        orchestrator_checkpoint_id=orchestrator_checkpoint_id,
+        orchestrator_device=orchestrator_device,
         orchestrator_max_attempts=orchestrator_max_attempts,
     )
 
@@ -40,12 +48,18 @@ def plan_problem_topology(
     problem: ProblemInstance,
     *,
     orchestrator_policy: TopologyOrchestratorPolicy | None = None,
+    orchestrator_checkpoint: str | Path | None = None,
+    orchestrator_checkpoint_id: str | None = None,
+    orchestrator_device: str = "cpu",
     orchestrator_max_attempts: int = 1,
 ) -> TopologyPlan:
     """Return a validated topology plan for a problem instance."""
     return plan_topology(
         problem,
         orchestrator_policy=orchestrator_policy,
+        orchestrator_checkpoint=orchestrator_checkpoint,
+        orchestrator_checkpoint_id=orchestrator_checkpoint_id,
+        orchestrator_device=orchestrator_device,
         orchestrator_max_attempts=orchestrator_max_attempts,
     )
 
@@ -53,13 +67,19 @@ def plan_problem_topology(
 def plan_problem_topology_candidate(
     problem: ProblemInstance,
     *,
-    orchestrator_policy: TopologyOrchestratorPolicy,
+    orchestrator_policy: TopologyOrchestratorPolicy | None = None,
+    orchestrator_checkpoint: str | Path | None = None,
+    orchestrator_checkpoint_id: str | None = None,
+    orchestrator_device: str = "cpu",
     orchestrator_max_attempts: int = 1,
 ) -> LearnedTopologyPlan:
     """Return the learned-policy YAML candidate plus the parsed topology."""
     return plan_topology_candidate(
         problem,
         orchestrator_policy=orchestrator_policy,
+        orchestrator_checkpoint=orchestrator_checkpoint,
+        orchestrator_checkpoint_id=orchestrator_checkpoint_id,
+        orchestrator_device=orchestrator_device,
         orchestrator_max_attempts=orchestrator_max_attempts,
     )
 
@@ -67,13 +87,19 @@ def plan_problem_topology_candidate(
 def revise_problem_topology_candidate(
     revision: TopologyRevisionInput,
     *,
-    orchestrator_policy: TopologyOrchestratorPolicy,
+    orchestrator_policy: TopologyOrchestratorPolicy | None = None,
+    orchestrator_checkpoint: str | Path | None = None,
+    orchestrator_checkpoint_id: str | None = None,
+    orchestrator_device: str = "cpu",
     orchestrator_max_attempts: int = 1,
 ) -> LearnedTopologyPlan:
     """Return the learned-policy revised YAML candidate plus the parsed topology."""
     return revise_topology_candidate(
         revision,
         orchestrator_policy=orchestrator_policy,
+        orchestrator_checkpoint=orchestrator_checkpoint,
+        orchestrator_checkpoint_id=orchestrator_checkpoint_id,
+        orchestrator_device=orchestrator_device,
         orchestrator_max_attempts=orchestrator_max_attempts,
     )
 

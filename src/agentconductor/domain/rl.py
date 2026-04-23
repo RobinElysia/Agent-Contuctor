@@ -1,4 +1,4 @@
-"""Typed contracts for the repository-local RL baseline."""
+"""Typed contracts for repository-local RL checkpoint optimization."""
 
 from __future__ import annotations
 
@@ -16,20 +16,81 @@ class RewardBreakdown:
 
 
 @dataclass(frozen=True, slots=True)
-class RlTrainingConfig:
-    """Configuration for the repository-local RL baseline."""
+class RlRolloutRecord:
+    """One rollout record used by the repository-local RL stage."""
 
-    rollouts: int = 1
+    rollout_index: int
+    group_index: int
+    problem_id: str
+    difficulty: str
+    source_checkpoint_id: str
+    resulting_checkpoint_id: str
+    topology_node_count: int
+    topology_yaml: str
+    execution_outcome: str
+    reward_breakdown: RewardBreakdown
+
+
+@dataclass(frozen=True, slots=True)
+class RlPolicyUpdateSummary:
+    """Inspectable summary of one lightweight GRPO-style policy update."""
+
+    optimizer_name: str
+    source_checkpoint_id: str
+    resulting_checkpoint_id: str
+    rollout_count: int
+    group_size: int
+    average_reward: float
+    average_advantage: float
+    applied_update_scale: float
+    optimizer_steps: int
+
+
+@dataclass(frozen=True, slots=True)
+class RlTrainingConfig:
+    """Configuration for repository-local RL checkpoint optimization."""
+
+    rollout_count: int = 4
+    group_size: int = 2
+    turn_budget: int = 2
     seed: int = 0
+    optimizer_learning_rate: float = 1e-5
+    optimizer_name: str = "grpo-stub"
+    checkpoint_device: str = "cpu"
 
     def __post_init__(self) -> None:
-        if self.rollouts < 1:
-            raise ValueError("rollouts must be at least 1")
+        if self.rollout_count < 1:
+            raise ValueError("rollout_count must be at least 1")
+        if self.group_size < 1:
+            raise ValueError("group_size must be at least 1")
+        if self.rollout_count % self.group_size != 0:
+            raise ValueError("rollout_count must be divisible by group_size")
+        if self.turn_budget < 1:
+            raise ValueError("turn_budget must be at least 1")
+        if self.optimizer_learning_rate <= 0:
+            raise ValueError("optimizer_learning_rate must be > 0")
+        if not self.optimizer_name.strip():
+            raise ValueError("optimizer_name must be a non-empty string")
+        if not self.checkpoint_device.strip():
+            raise ValueError("checkpoint_device must be a non-empty string")
 
 
 @dataclass(frozen=True, slots=True)
 class RlTrainingArtifact:
-    """Inspectable artifact written by the RL baseline entrypoint."""
+    """Inspectable artifact written by the RL training entrypoint."""
 
+    dataset_path: str
+    source_checkpoint_id: str
+    source_checkpoint_path: str
+    rollout_manifest_path: str
+    checkpoint_id: str
+    checkpoint_path: str
+    checkpoint_metadata_path: str
     rollout_count: int
+    group_size: int
+    turn_budget: int
+    optimizer_name: str
+    optimizer_learning_rate: float
     average_reward: float
+    average_advantage: float
+    seed: int

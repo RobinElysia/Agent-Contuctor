@@ -1,11 +1,13 @@
 from agentconductor import (
     DifficultyLevel,
     ProblemInstance,
+    generate_sft_dataset_entrypoint,
     TopologyCandidateExtractionError,
     TopologyLogicError,
     plan_problem_topology,
     plan_problem_topology_candidate,
     revise_problem_topology_candidate,
+    run_sft_baseline_entrypoint,
 )
 from agentconductor.application.orchestrator import (
     ProblemShape,
@@ -195,6 +197,28 @@ steps:
     assert candidate.topology_yaml.startswith("difficulty: medium\n")
     assert "Problem id: policy-medium" in policy.prompts[0]
     assert policy.requests[0].kind is TopologyPromptKind.INITIAL
+
+
+def test_plan_problem_topology_candidate_can_load_checkpoint_artifact(
+    tmp_path,
+) -> None:
+    dataset_path = tmp_path / "sft-dataset.jsonl"
+    artifact_path = tmp_path / "sft-run.json"
+    generate_sft_dataset_entrypoint(dataset_path)
+    run_sft_baseline_entrypoint(dataset_path, artifact_path)
+
+    candidate = plan_problem_topology_candidate(
+        ProblemInstance(
+            identifier="policy-checkpoint",
+            prompt="Implement a correct solution.",
+            difficulty=DifficultyLevel.EASY,
+        ),
+        orchestrator_checkpoint=artifact_path,
+    )
+
+    assert candidate.kind is TopologyPromptKind.INITIAL
+    assert candidate.topology.difficulty is DifficultyLevel.EASY
+    assert candidate.topology_yaml.startswith("difficulty: easy\n")
 
 
 def test_revise_problem_topology_candidate_retries_and_surfaces_last_validation_error() -> None:

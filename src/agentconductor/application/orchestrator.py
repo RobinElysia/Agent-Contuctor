@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from dataclasses import replace
 from enum import StrEnum
+from pathlib import Path
 import re
 
+from agentconductor.domain.execution import ExecutionStatus
 from agentconductor.domain.history import TopologyRevisionInput
 from agentconductor.domain.orchestration import (
     LearnedTopologyPlan,
+    OrchestratorCheckpointLoadError,
+    OrchestratorMode,
     OrchestratorPromptRequest,
     TopologyCandidateExtractionError,
     TopologyOrchestratorPolicy,
@@ -22,6 +26,10 @@ from agentconductor.domain.topology import (
     TopologyLogicError,
     TopologyPlan,
     TopologyStep,
+)
+from agentconductor.domain.training import OrchestratorCheckpointMetadata
+from agentconductor.infrastructure.training_checkpoint import (
+    resolve_orchestrator_checkpoint_metadata,
 )
 from agentconductor.infrastructure.topology_yaml import (
     dump_topology_yaml_mapping,
@@ -59,6 +67,77 @@ YAML_FENCE_PATTERN = re.compile(
     r"```(?:yaml|yml)?\s*(.*?)```",
     re.IGNORECASE | re.DOTALL,
 )
+SUPPORTED_FROZEN_PROMPT_TEMPLATE = "orchestrator-sft-v1"
+SUPPORTED_FROZEN_DEVICE = "cpu"
+
+
+class CheckpointTopologyPolicy:
+    """Repository-local checkpoint-backed frozen-inference policy."""
+
+    def __init__(
+        self,
+        metadata: OrchestratorCheckpointMetadata,
+        *,
+        device: str = SUPPORTED_FROZEN_DEVICE,
+    ) -> None:
+        if device != SUPPORTED_FROZEN_DEVICE:
+            raise OrchestratorCheckpointLoadError(
+                "repository-local frozen inference currently supports only "
+                f"device='{SUPPORTED_FROZEN_DEVICE}'"
+            )
+        if metadata.target_format != "yaml":
+            raise OrchestratorCheckpointLoadError(
+                "checkpoint metadata must target YAML frozen inference"
+            )
+        if metadata.prompt_template_version != SUPPORTED_FROZEN_PROMPT_TEMPLATE:
+            raise OrchestratorCheckpointLoadError(
+                "checkpoint prompt template version "
+                f"'{metadata.prompt_template_version}' is not supported; expected "
+                f"'{SUPPORTED_FROZEN_PROMPT_TEMPLATE}'"
+            )
+        checkpoint_dir = Path(metadata.checkpoint_path)
+        weights_stub_path = checkpoint_dir / "weights.stub"
+        if not weights_stub_path.exists():
+            raise OrchestratorCheckpointLoadError(
+                f"checkpoint weights artifact is missing: {weights_stub_path}"
+            )
+        self.metadata = metadata
+        self.device = device
+
+    def generate_topology_candidate(
+        self,
+        *,
+        prompt: str,
+        request: OrchestratorPromptRequest,
+    ) -> str:
+        del prompt
+        if request.kind is TopologyPromptKind.INITIAL:
+            topology = plan_topology_for_problem(request.problem)
+        else:
+            if request.testing_feedback is None:
+                raise OrchestratorCheckpointLoadError(
+                    "revision inference requires testing feedback"
+                )
+            if request.prior_topology is None:
+                raise OrchestratorCheckpointLoadError(
+                    "revision inference requires a prior topology"
+                )
+            if request.remaining_turns is None:
+                raise OrchestratorCheckpointLoadError(
+                    "revision inference requires remaining_turns"
+                )
+            topology = revise_topology_for_feedback(
+                TopologyRevisionInput(
+                    problem=request.problem,
+                    selected_difficulty=request.selected_difficulty,
+                    turn_index=request.turn_index,
+                    prior_topology=request.prior_topology,
+                    prior_execution_status=ExecutionStatus.COMPLETED,
+                    testing_feedback=request.testing_feedback,
+                    remaining_turns=request.remaining_turns,
+                )
+            )
+        return dump_topology_yaml_mapping(topology.to_mapping())
 
 
 def infer_problem_shape(problem: ProblemInstance) -> ProblemShape:
@@ -75,6 +154,33 @@ def infer_problem_shape(problem: ProblemInstance) -> ProblemShape:
     if any(keyword in prompt for keyword in KNOWLEDGE_KEYWORDS):
         return ProblemShape.KNOWLEDGE_INTENSIVE
     return ProblemShape.GENERAL
+
+
+def resolve_orchestrator_runtime(
+    *,
+    orchestrator_policy: TopologyOrchestratorPolicy | None = None,
+    orchestrator_checkpoint: str | Path | None = None,
+    orchestrator_checkpoint_id: str | None = None,
+    orchestrator_device: str = SUPPORTED_FROZEN_DEVICE,
+) -> tuple[OrchestratorMode, TopologyOrchestratorPolicy | None, OrchestratorCheckpointMetadata | None]:
+    """Resolve the orchestrator path for deterministic, direct-policy, or checkpoint modes."""
+    if orchestrator_policy is not None and orchestrator_checkpoint is not None:
+        raise ValueError(
+            "orchestrator_policy and orchestrator_checkpoint are mutually exclusive"
+        )
+    if orchestrator_policy is not None:
+        return OrchestratorMode.LEARNED, orchestrator_policy, None
+    if orchestrator_checkpoint is None:
+        return OrchestratorMode.DETERMINISTIC, None, None
+    metadata = resolve_orchestrator_checkpoint_metadata(
+        orchestrator_checkpoint,
+        checkpoint_id=orchestrator_checkpoint_id,
+    )
+    return (
+        OrchestratorMode.LEARNED,
+        CheckpointTopologyPolicy(metadata, device=orchestrator_device),
+        metadata,
+    )
 
 
 def plan_topology_for_problem(problem: ProblemInstance) -> TopologyPlan:
