@@ -758,6 +758,89 @@ Out of scope:
 - model training
 - leaderboard result publication
 
+### Task ID: BENCH-05
+Status: todo
+Depends on: BENCH-04
+Scope: extend the benchmark execution contracts to represent compiled-language build and run phases explicitly
+Files:
+- `src/agentconductor/domain/`
+- `src/agentconductor/application/`
+- `src/agentconductor/infrastructure/`
+- `tests/`
+- `API.md`
+- `docs/tech.md`
+- `README.md`
+Implementation notes:
+- add typed benchmark-owned fields for compiled-language source layout, compile commands or templates, executable targets, and phase-specific resource limits without leaking vendor wire formats into application services
+- keep the existing Python and JavaScript script-first path intact while making compile and run phases inspectable in artifacts and diagnostics
+- define how compile-time failures, run-time failures, and harness failures map into repository `TestingOutcome` values without collapsing them into one generic runtime error
+- document which pieces remain repository-local inferences versus official benchmark semantics
+Acceptance criteria:
+- the benchmark contracts can describe both interpreted and compiled-language execution without forcing caller code to construct benchmark-vendor payloads
+- compile and run phases have explicit typed diagnostics and artifact identifiers
+- tests cover schema validation for compiled-language settings and one adapter-stub path that emits compile-phase versus run-phase failures distinctly
+- docs explain the new compile or run contract and the remaining unsupported benchmark-language combinations
+Out of scope:
+- full C++ or Java execution
+- remote vendor-native submission services
+- leaderboard aggregation
+
+### Task ID: BENCH-06
+Status: todo
+Depends on: BENCH-05
+Scope: add a local compiled-language benchmark harness for the first paper-relevant C++ and Java execution paths
+Files:
+- `src/agentconductor/infrastructure/`
+- `src/agentconductor/application/`
+- `src/agentconductor/domain/`
+- `tests/`
+- `API.md`
+- `docs/tech.md`
+- `README.md`
+Implementation notes:
+- implement explicit compile then run handling for at least C++ and Java, including temporary workspace layout, executable or class discovery, and per-phase diagnostics
+- keep language-specific command construction in infrastructure adapters so the benchmark application services continue to dispatch on typed language metadata only
+- make toolchain availability explicit and inspectable so unsupported host environments fail as adapter errors rather than silent skips
+- preserve the existing Python and JavaScript local harnesses as the low-friction developer path when compiled-language toolchains are unavailable
+Acceptance criteria:
+- the repository can execute at least one compiled-language benchmark record end to end through a local benchmark harness
+- tests or smoke verification cover one successful compiled-language path and one compile-phase failure path
+- docs enumerate which compiled languages are supported locally, which toolchains are required, and which benchmark-language combinations remain unsupported
+- caller-facing benchmark APIs stay unchanged apart from the expanded typed execution settings introduced earlier
+Out of scope:
+- remote benchmark vendor submission
+- distributed compile farms or cluster scheduling
+- exact leaderboard reproduction
+
+### Task ID: BENCH-07
+Status: todo
+Depends on: BENCH-05, BENCH-06
+Scope: add a vendor-native benchmark runtime boundary for benchmarks that cannot be faithfully reproduced through only local harness execution
+Files:
+- `src/agentconductor/domain/`
+- `src/agentconductor/application/`
+- `src/agentconductor/infrastructure/`
+- `src/agentconductor/interfaces/`
+- `tests/`
+- `API.md`
+- `docs/Paper.md`
+- `docs/tech.md`
+- `README.md`
+Implementation notes:
+- model submission, polling, result download, and vendor-side artifact provenance as typed contracts rather than overloading the local harness result path
+- keep local harness execution and vendor-native execution as separate infrastructure adapters behind the same benchmark seam so later evaluation can choose intentionally
+- document authentication, licensing, dataset access, or benchmark-policy constraints that may block exact repository-local reproduction
+- make it explicit which benchmark-language combinations now use vendor-native execution and which still use repository-local harnesses
+Acceptance criteria:
+- the repository exposes a typed vendor-native benchmark runtime path distinct from the local harness adapters
+- vendor-native results preserve submission identifiers, terminal verdict mapping, and artifact provenance needed for later evaluation reporting
+- tests cover at least one fixture-driven vendor submission lifecycle path, including submission, terminal result collection, and adapter-error handling
+- docs explain when callers should use vendor-native runtime versus the local harness path and what external constraints apply
+Out of scope:
+- public leaderboard submission automation
+- production secrets management beyond explicit configuration boundaries
+- paper-level result claims by itself
+
 ### Task ID: TRAIN-02
 Status: todo
 Depends on: TOP-02, ORCH-02, BENCH-02, TRAIN-01
@@ -842,7 +925,7 @@ Out of scope:
 
 ### Task ID: EVAL-02
 Status: todo
-Depends on: BENCH-03, ORCH-03, RL-02
+Depends on: BENCH-07, ORCH-03, RL-02
 Scope: run benchmark-aligned evaluation over trained frozen inference and produce leaderboard-grade aggregate metrics
 Files:
 - `src/agentconductor/application/`
@@ -869,7 +952,7 @@ Out of scope:
 
 ### Task ID: REPRO-01
 Status: todo
-Depends on: BENCH-04, EVAL-02
+Depends on: BENCH-07, EVAL-02
 Scope: close the remaining fidelity gaps required for exact paper-style benchmark reproduction and leaderboard comparison
 Files:
 - `docs/Paper.md`
