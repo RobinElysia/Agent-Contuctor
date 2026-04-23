@@ -18,7 +18,9 @@ keywords = [
   "research-reproduction",
 ]
 dependencies = [
+  "build>=1.4.4",
   "PyYAML>=6.0.2",
+  "twine>=6.2.0",
 ]
 
 [project.scripts]
