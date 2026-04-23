@@ -14,9 +14,11 @@ The repository currently provides:
 - a typed external benchmark adapter seam for benchmark metadata, verdict normalization, and run artifact identifiers
 - canonical benchmark dataset ingestion for APPS-style JSONL records
 - a multi-language benchmark execution path for Python and JavaScript canonical benchmark records
+- phase-aware benchmark execution contracts that now model compile and run phases explicitly
+- a typed vendor-native benchmark runtime boundary with fixture-driven submission and polling lifecycle coverage
 - focused tests for the bootstrap and API layers
 
-The repository does not yet implement the full paper runtime. The current API can run up to the configured turn budget with deterministic or checkpoint-backed topology revision, and the repository now emits benchmark-aligned evaluation artifacts, but the benchmark runtime is still repository-local rather than vendor-native.
+The repository does not yet implement the full paper runtime. The current API can run up to the configured turn budget with deterministic or checkpoint-backed topology revision, and the repository now emits benchmark-aligned evaluation artifacts. Local evaluation still defaults to repository-local harness adapters, while the vendor-native runtime boundary is currently verified through fixture-driven stubs rather than a live external service.
 
 ## Current Status
 
@@ -50,10 +52,12 @@ Completed milestones:
 - `BENCH-02`: canonical benchmark dataset ingestion and normalization for APPS-style JSONL artifacts
 - `BENCH-03`: concrete Python benchmark execution path over canonical benchmark records
 - `BENCH-04`: multi-language benchmark execution dispatch for Python and JavaScript records, plus stricter stdin script fidelity
+- `BENCH-05`: phase-aware benchmark execution contracts for compiled-language compile or run settings and diagnostics
+- `BENCH-07`: typed vendor-native benchmark runtime boundary with submission receipt, poll history, and artifact provenance
 
 Not yet implemented:
 
-- benchmark execution beyond the current Python and JavaScript local harnesses
+- a local compiled-language harness for the first C++ or Java benchmark paths
 - exact paper-scale checkpoint training or benchmark leaderboard reproduction
 
 ## Project Layout
@@ -352,6 +356,12 @@ uv run python -m agentconductor.interfaces.rl --dataset .\artifacts\sft-dataset.
 - The current benchmark runtime supports Python and JavaScript. Function-style
   records execute through language-aware call boundaries, while stdin-style
   records now run as standalone scripts with benchmark-owned stdin payloads.
+- Benchmark execution settings can now also carry explicit compile and run
+  phase contracts for compiled-language records, including source layout,
+  command templates, executable targets, and per-phase resource limits.
+- Benchmark result artifacts now preserve typed per-phase diagnostics and
+  artifact identifiers so compile failures and run-time failures stay
+  distinguishable in later evaluation or vendor-runtime reporting.
 - The JavaScript function path accepts CommonJS exports and also applies a
   narrow repository compatibility shim for top-level `solve(...)` definitions;
   that shim is an implementation inference rather than a benchmark-native rule.
@@ -390,16 +400,20 @@ uv run python -m agentconductor.interfaces.rl --dataset .\artifacts\sft-dataset.
 - The current RL optimizer is still a repository-local GRPO-shaped stub. It
   makes rollout rewards, checkpoint lineage, and update scale explicit, but it
   does not claim paper-scale distributed training fidelity.
-- The current benchmark evaluation runtime still uses repository-local Python
-  and JavaScript harness adapters. Vendor-native runtime fidelity remains a
-  later task, so reported metrics should be treated as benchmark-aligned rather
-  than exact leaderboard claims.
+- The repository now also exposes a vendor-native benchmark runtime boundary
+  with typed submission receipt, poll history, terminal verdict mapping, and
+  artifact provenance. The current verification path is fixture-driven rather
+  than backed by a live external service.
+- The default benchmark evaluation runtime still uses repository-local Python
+  and JavaScript harness adapters. Reported metrics should therefore be treated
+  as benchmark-aligned rather than exact leaderboard claims unless callers
+  intentionally route through a configured vendor-native adapter.
 - When behavior is inferred rather than stated by the paper, the repository documents that explicitly.
 
 ## Next Likely Steps
 
 - extend benchmark dataset normalization beyond APPS-style JSONL sources
-- extend benchmark execution beyond the current Python and JavaScript local harnesses, especially for compiled-language and vendor-native runtimes
+- add the first local compiled-language benchmark harness on top of the new phase-aware benchmark contract
 - replace the mock checkpoint runtime with real checkpoint-backed model inference
 - replace the lightweight GRPO-style stub updater with a fuller paper-aligned RL optimizer
-- close the vendor-native runtime gap so benchmark evaluation can move from local-harness alignment to stricter paper-level reproduction
+- replace the fixture-driven vendor-native benchmark stub with a real external runtime integration where licensing and authentication permit it

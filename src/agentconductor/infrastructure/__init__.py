@@ -6,6 +6,8 @@ from agentconductor.infrastructure.benchmark import (
     PythonBenchmarkJudgeAdapter,
     StubBenchmarkAdapter,
     StubBenchmarkSubmission,
+    StubVendorNativeBenchmarkAdapter,
+    StubVendorSubmissionScenario,
 )
 from agentconductor.infrastructure.benchmark_dataset import read_jsonl_objects
 from agentconductor.infrastructure.sandbox import (
@@ -30,6 +32,8 @@ __all__ = [
     "read_jsonl_objects",
     "StubBenchmarkAdapter",
     "StubBenchmarkSubmission",
+    "StubVendorNativeBenchmarkAdapter",
+    "StubVendorSubmissionScenario",
     "TopologyYamlError",
     "TopologyYamlParseError",
     "TopologyYamlSchemaError",

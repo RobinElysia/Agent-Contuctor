@@ -24,6 +24,38 @@ class BenchmarkEvaluationStatus(StrEnum):
     ADAPTER_ERROR = "adapter_error"
 
 
+class BenchmarkRuntimeMode(StrEnum):
+    """Which benchmark runtime family produced an evaluation result."""
+
+    LOCAL_HARNESS = "local_harness"
+    VENDOR_NATIVE = "vendor_native"
+    VENDOR_STUB = "vendor_stub"
+
+
+class BenchmarkExecutionPhase(StrEnum):
+    """Named execution phases owned by the benchmark contract."""
+
+    COMPILE = "compile"
+    RUN = "run"
+
+
+class BenchmarkPhaseStatus(StrEnum):
+    """Status for one benchmark execution phase."""
+
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+class BenchmarkVendorSubmissionState(StrEnum):
+    """Lifecycle states for vendor-native benchmark submissions."""
+
+    SUBMITTED = "submitted"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    ADAPTER_ERROR = "adapter_error"
+
+
 class BenchmarkDatasetFormat(StrEnum):
     """External dataset layouts that can be normalized into canonical records."""
 
@@ -77,6 +109,9 @@ class BenchmarkExecutionSettings:
     entrypoint: str | None = "solve"
     time_limit_seconds: float | None = None
     memory_limit_bytes: int | None = None
+    phase_settings: tuple["BenchmarkPhaseExecutionSettings", ...] = ()
+    runtime_mode: BenchmarkRuntimeMode = BenchmarkRuntimeMode.LOCAL_HARNESS
+    vendor_runtime_name: str | None = None
 
     def __post_init__(self) -> None:
         if not self.language:
@@ -89,6 +124,82 @@ class BenchmarkExecutionSettings:
             raise ValueError("time_limit_seconds must be > 0 when provided")
         if self.memory_limit_bytes is not None and self.memory_limit_bytes <= 0:
             raise ValueError("memory_limit_bytes must be > 0 when provided")
+        if self.vendor_runtime_name == "":
+            raise ValueError("vendor_runtime_name must be omitted or a non-empty string")
+        if (
+            self.runtime_mode in {BenchmarkRuntimeMode.VENDOR_NATIVE, BenchmarkRuntimeMode.VENDOR_STUB}
+            and not self.vendor_runtime_name
+        ):
+            raise ValueError(
+                "vendor_runtime_name is required when runtime_mode is vendor-native or vendor-stub"
+            )
+        seen_phases: set[BenchmarkExecutionPhase] = set()
+        for phase_setting in self.phase_settings:
+            if phase_setting.phase in seen_phases:
+                raise ValueError(
+                    f"phase_settings contains duplicate phase '{phase_setting.phase.value}'"
+                )
+            seen_phases.add(phase_setting.phase)
+
+    @property
+    def compile_phase(self) -> "BenchmarkPhaseExecutionSettings | None":
+        """Return explicit compile-phase settings when present."""
+        for phase_setting in self.phase_settings:
+            if phase_setting.phase is BenchmarkExecutionPhase.COMPILE:
+                return phase_setting
+        return None
+
+    @property
+    def run_phase(self) -> "BenchmarkPhaseExecutionSettings | None":
+        """Return explicit run-phase settings when present."""
+        for phase_setting in self.phase_settings:
+            if phase_setting.phase is BenchmarkExecutionPhase.RUN:
+                return phase_setting
+        return None
+
+    @property
+    def requires_compilation(self) -> bool:
+        """Whether the benchmark contract explicitly models a compile phase."""
+        return self.compile_phase is not None
+
+
+@dataclass(frozen=True, slots=True)
+class BenchmarkPhaseResourceLimits:
+    """Phase-specific resource limits for benchmark compilation or execution."""
+
+    time_limit_seconds: float | None = None
+    memory_limit_bytes: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.time_limit_seconds is not None and self.time_limit_seconds <= 0:
+            raise ValueError("time_limit_seconds must be > 0 when provided")
+        if self.memory_limit_bytes is not None and self.memory_limit_bytes <= 0:
+            raise ValueError("memory_limit_bytes must be > 0 when provided")
+
+
+@dataclass(frozen=True, slots=True)
+class BenchmarkPhaseExecutionSettings:
+    """Explicit benchmark-owned settings for one compile or run phase."""
+
+    phase: BenchmarkExecutionPhase
+    source_layout: tuple[str, ...] = ()
+    command: tuple[str, ...] = ()
+    executable_target: str | None = None
+    resource_limits: BenchmarkPhaseResourceLimits = field(
+        default_factory=BenchmarkPhaseResourceLimits
+    )
+
+    def __post_init__(self) -> None:
+        if any(not path for path in self.source_layout):
+            raise ValueError("source_layout entries must be non-empty strings")
+        if any(not token for token in self.command):
+            raise ValueError("command entries must be non-empty strings")
+        if self.executable_target == "":
+            raise ValueError("executable_target must be omitted or a non-empty string")
+        if self.phase is BenchmarkExecutionPhase.COMPILE and not self.command:
+            raise ValueError("compile phase settings require a non-empty command")
+        if self.phase is BenchmarkExecutionPhase.RUN and not self.command:
+            raise ValueError("run phase settings require a non-empty command")
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +244,7 @@ class BenchmarkArtifactIdentifiers:
     submission_id: str | None = None
     result_artifact_uri: str | None = None
     log_artifact_uri: str | None = None
+    phase_artifacts: tuple["BenchmarkPhaseArtifactIdentifiers", ...] = ()
 
     def __post_init__(self) -> None:
         if not self.run_id:
@@ -146,14 +258,79 @@ class BenchmarkArtifactIdentifiers:
 
 
 @dataclass(frozen=True, slots=True)
+class BenchmarkPhaseArtifactIdentifiers:
+    """Inspectable artifact identifiers for one compile or run phase."""
+
+    phase: BenchmarkExecutionPhase
+    stdout_artifact_uri: str | None = None
+    stderr_artifact_uri: str | None = None
+    metadata_artifact_uri: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.stdout_artifact_uri == "":
+            raise ValueError("stdout_artifact_uri must be omitted or a non-empty string")
+        if self.stderr_artifact_uri == "":
+            raise ValueError("stderr_artifact_uri must be omitted or a non-empty string")
+        if self.metadata_artifact_uri == "":
+            raise ValueError("metadata_artifact_uri must be omitted or a non-empty string")
+
+
+@dataclass(frozen=True, slots=True)
+class BenchmarkPhaseResult:
+    """Typed result for one benchmark compile or run phase."""
+
+    phase: BenchmarkExecutionPhase
+    status: BenchmarkPhaseStatus
+    diagnostics: tuple[str, ...] = ()
+    artifact_identifiers: BenchmarkPhaseArtifactIdentifiers | None = None
+    repository_outcome: TestingOutcome | None = None
+    returncode: int | None = None
+    timed_out: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class BenchmarkVendorSubmissionReceipt:
+    """Typed receipt returned after a vendor-native submission is created."""
+
+    submission_id: str
+    runtime_name: str
+
+    def __post_init__(self) -> None:
+        if not self.submission_id:
+            raise ValueError("submission_id must be a non-empty string")
+        if not self.runtime_name:
+            raise ValueError("runtime_name must be a non-empty string")
+
+
+@dataclass(frozen=True, slots=True)
+class BenchmarkVendorPollSnapshot:
+    """One observed vendor-native submission state transition."""
+
+    submission_id: str
+    state: BenchmarkVendorSubmissionState
+    terminal_verdict: str | None = None
+    diagnostics: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.submission_id:
+            raise ValueError("submission_id must be a non-empty string")
+        if self.terminal_verdict == "":
+            raise ValueError("terminal_verdict must be omitted or a non-empty string")
+
+
+@dataclass(frozen=True, slots=True)
 class BenchmarkEvaluationResult:
     """Typed benchmark adapter result consumed by repository services."""
 
     adapter_name: str
     status: BenchmarkEvaluationStatus
     problem: BenchmarkProblemDefinition
+    runtime_mode: BenchmarkRuntimeMode = BenchmarkRuntimeMode.LOCAL_HARNESS
     artifact_identifiers: BenchmarkArtifactIdentifiers | None = None
     verdict_mapping: BenchmarkVerdictMapping | None = None
+    phase_results: tuple[BenchmarkPhaseResult, ...] = ()
+    vendor_submission_receipt: BenchmarkVendorSubmissionReceipt | None = None
+    vendor_poll_history: tuple[BenchmarkVendorPollSnapshot, ...] = ()
     diagnostics: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:

@@ -57,13 +57,23 @@ Other public types:
 - `agentconductor.BenchmarkArtifactIdentifiers`
 - `agentconductor.BenchmarkDatasetFormat`
 - `agentconductor.BenchmarkDatasetSource`
+- `agentconductor.BenchmarkExecutionPhase`
 - `agentconductor.BenchmarkEvaluationResult`
 - `agentconductor.BenchmarkEvaluationStatus`
 - `agentconductor.BenchmarkExecutionSettings`
 - `agentconductor.BenchmarkInvocationMode`
+- `agentconductor.BenchmarkPhaseArtifactIdentifiers`
+- `agentconductor.BenchmarkPhaseExecutionSettings`
+- `agentconductor.BenchmarkPhaseResourceLimits`
+- `agentconductor.BenchmarkPhaseResult`
+- `agentconductor.BenchmarkPhaseStatus`
 - `agentconductor.BenchmarkProblemDefinition`
+- `agentconductor.BenchmarkRuntimeMode`
 - `agentconductor.BenchmarkTestCase`
 - `agentconductor.BenchmarkVerdictMapping`
+- `agentconductor.BenchmarkVendorPollSnapshot`
+- `agentconductor.BenchmarkVendorSubmissionReceipt`
+- `agentconductor.BenchmarkVendorSubmissionState`
 - `agentconductor.CanonicalBenchmarkDataset`
 - `agentconductor.CanonicalBenchmarkRecord`
 - `agentconductor.DistributedEvaluationBatch`
@@ -95,6 +105,8 @@ Other public types:
 - `agentconductor.MultiLanguageBenchmarkJudgeAdapter`
 - `agentconductor.StubBenchmarkAdapter`
 - `agentconductor.StubBenchmarkSubmission`
+- `agentconductor.StubVendorNativeBenchmarkAdapter`
+- `agentconductor.StubVendorSubmissionScenario`
 - `agentconductor.TopologyExecutionError`
 - `agentconductor.SolveState`
 - `agentconductor.SolveTurnRecord`
@@ -364,22 +376,41 @@ Key benchmark-facing types:
 - `BenchmarkProblemDefinition`
   Canonical benchmark metadata including `benchmark_name`, `dataset_name`, `source_problem_id`, optional `split_name`, repository-facing `identifier`, `prompt`, and `language`.
 - `BenchmarkExecutionSettings`
-  External-harness execution settings such as `language`, invocation mode, entrypoint, and benchmark-owned resource limits.
+  External-harness execution settings such as `language`, invocation mode,
+  entrypoint, benchmark-owned resource limits, optional compile or run phase
+  settings, and explicit runtime mode.
+- `BenchmarkPhaseExecutionSettings`
+  One benchmark-owned compile or run phase with explicit `source_layout`,
+  `command`, optional `executable_target`, and `resource_limits`.
+- `BenchmarkPhaseResourceLimits`
+  Phase-specific time and memory limits for compile or run phases.
 - `BenchmarkTestCase`
   Benchmark-owned cases expressed independently from the repository-local judge payload types.
 - `BenchmarkVerdictMapping`
   Normalized mapping from a benchmark-native verdict string into repository `TestingOutcome`.
 - `BenchmarkArtifactIdentifiers`
-  Typed identifiers for benchmark-side run artifacts such as `run_id`, `submission_id`, and optional result or log URIs.
+  Typed identifiers for benchmark-side run artifacts such as `run_id`,
+  `submission_id`, optional result or log URIs, and per-phase artifact ids.
+- `BenchmarkPhaseArtifactIdentifiers`
+  Typed artifact ids for one compile or run phase.
+- `BenchmarkPhaseResult`
+  Typed per-phase diagnostics that keep compile failures and run-time failures
+  distinct.
+- `BenchmarkVendorSubmissionReceipt`
+  Typed submission metadata for vendor-native runtimes.
+- `BenchmarkVendorPollSnapshot`
+  One observed vendor-native poll state, including terminal verdict when known.
 - `BenchmarkEvaluationResult`
-  Adapter result containing adapter status, normalized verdict mapping, typed diagnostics, and optional artifact identifiers.
+  Adapter result containing adapter status, runtime mode, normalized verdict
+  mapping, typed diagnostics, optional artifact identifiers, optional
+  per-phase results, and optional vendor submission lifecycle metadata.
 
 Current scope and limits:
 
 - the repository now exposes a typed benchmark adapter seam plus one canonical dataset-ingestion path for APPS-style JSONL artifacts
 - the included `StubBenchmarkAdapter` is only for contract verification and fixture-driven tests
 - the local subprocess judge remains the explicit development fallback for current solve execution
-- the repository now includes concrete Python and Node.js benchmark execution adapters plus a multi-language dispatch adapter, but they still remain local harnesses rather than remote benchmark services
+- the repository now includes concrete Python and Node.js benchmark execution adapters plus a multi-language dispatch adapter, and it also exposes a separate stubbed vendor-native runtime boundary for submission-lifecycle verification
 
 ### `load_canonical_benchmark_dataset(dataset_path, *, source_format=BenchmarkDatasetFormat.APPS_JSONL) -> CanonicalBenchmarkDataset`
 
@@ -419,7 +450,7 @@ Current scope and limits:
 - only APPS-style JSONL ingestion is wired in this milestone
 - the repository does not bundle benchmark payloads and assumes the caller has legitimate local access to the source artifact
 - some APPS rows may still load as metadata-only records when they do not include executable `input_output` payloads
-- benchmark-specific leaderboard reporting and compiled-language runtime support remain later milestones
+- compiled-language local harness execution is still a later milestone even though the benchmark contract now carries explicit compile or run phase settings
 
 ### `evaluate_candidate_against_benchmark_record(record, candidate, *, adapter) -> BenchmarkEvaluationResult`
 
@@ -450,14 +481,23 @@ Current concrete benchmark paths:
 - `MultiLanguageBenchmarkJudgeAdapter`
   Dispatches to the configured Python or Node.js benchmark harness based on the
   canonical record's `BenchmarkExecutionSettings.language`.
+- `StubVendorNativeBenchmarkAdapter`
+  Exercises a vendor-native benchmark lifecycle through typed submission
+  receipts, poll history, terminal verdict mapping, and artifact provenance
+  without requiring a live external service.
 
 Current fidelity limits:
 
 - Python and JavaScript function-style invocation is closest to benchmark semantics when `fn_name` is available
 - stdin-style Python and JavaScript execution now runs the candidate as a standalone script with benchmark-owned stdin payloads
 - the JavaScript function path expects a CommonJS export and adds a repository-local compatibility shim for top-level `solve(...)` definitions
-- artifact capture is local and file-based rather than vendor-native
-- benchmark-specific output normalization rules and compiled-language runtimes remain later milestones
+- local harness artifact capture is file-based and now also preserves typed
+  per-phase compile or run artifact identifiers
+- real vendor-native integrations still depend on external authentication,
+  licensing, and service availability; the repository currently verifies that
+  boundary through a fixture-driven stub
+- benchmark-specific output normalization rules and compiled-language local
+  harnesses remain later milestones
 
 ## Topology Planning API
 
@@ -617,6 +657,9 @@ Current fidelity note:
 - the default runtime still uses repository-local Python and JavaScript
   benchmark harness adapters, so the produced metrics are benchmark-aligned but
   not yet vendor-native leaderboard reproductions
+- callers can now intentionally choose a vendor-native adapter boundary, but
+  the bundled verification path is still the fixture-driven
+  `StubVendorNativeBenchmarkAdapter` rather than a live service integration
 
 ### `run_batch_evaluation_entrypoint(...) -> EvaluationRunArtifact`
 

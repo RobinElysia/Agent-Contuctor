@@ -20,6 +20,7 @@ from agentconductor.domain.benchmark import (
     BenchmarkDatasetFormat,
     BenchmarkEvaluationResult,
     BenchmarkEvaluationStatus,
+    BenchmarkRuntimeMode,
     CanonicalBenchmarkDataset,
     CanonicalBenchmarkRecord,
 )
@@ -477,10 +478,10 @@ def _build_harness_version(adapter: BenchmarkAdapter) -> str:
 
 
 def _infer_runtime_mode(adapter: BenchmarkAdapter) -> str:
-    adapter_name = _adapter_name(adapter)
-    if "stub" in adapter_name:
-        return "vendor_stub"
-    return "local_harness"
+    runtime_mode = getattr(adapter, "_runtime_mode", BenchmarkRuntimeMode.LOCAL_HARNESS)
+    if isinstance(runtime_mode, BenchmarkRuntimeMode):
+        return runtime_mode.value
+    return str(runtime_mode)
 
 
 def _build_evaluation_notes(*, adapter: BenchmarkAdapter) -> tuple[str, ...]:
@@ -489,9 +490,17 @@ def _build_evaluation_notes(*, adapter: BenchmarkAdapter) -> tuple[str, ...]:
         "Aggregate metrics are computed from structured per-attempt artifacts rather than ad hoc logs.",
         "Reported pass@k is repository-observed best-of-k over repeated solve attempts, not an unbiased estimator from independent stochastic sampling.",
     ]
-    if runtime_mode != "vendor_stub":
+    if runtime_mode == BenchmarkRuntimeMode.LOCAL_HARNESS.value:
         notes.append(
             "This evaluation run is benchmark-aligned through the canonical dataset plus local benchmark harness adapters; BENCH-07 vendor-native runtime fidelity is still pending."
+        )
+    elif runtime_mode == BenchmarkRuntimeMode.VENDOR_STUB.value:
+        notes.append(
+            "This evaluation run exercised the vendor-native submission lifecycle through a fixture-driven stub adapter; real external authentication, licensing, and service availability are still out of repository scope."
+        )
+    elif runtime_mode == BenchmarkRuntimeMode.VENDOR_NATIVE.value:
+        notes.append(
+            "This evaluation run used a vendor-native benchmark runtime path instead of the repository-local harness."
         )
     return tuple(notes)
 

@@ -810,7 +810,7 @@ Out of scope:
 - leaderboard result publication
 
 ### Task ID: BENCH-05
-Status: todo
+Status: done
 Depends on: BENCH-04
 Scope: extend the benchmark execution contracts to represent compiled-language build and run phases explicitly
 Files:
@@ -864,7 +864,7 @@ Out of scope:
 - exact leaderboard reproduction
 
 ### Task ID: BENCH-07
-Status: todo
+Status: done
 Depends on: BENCH-05, BENCH-06
 Scope: add a vendor-native benchmark runtime boundary for benchmarks that cannot be faithfully reproduced through only local harness execution
 Files:

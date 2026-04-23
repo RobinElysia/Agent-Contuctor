@@ -14,13 +14,21 @@ from pathlib import Path
 from agentconductor.domain.benchmark import (
     BenchmarkAdapter,
     BenchmarkArtifactIdentifiers,
+    BenchmarkExecutionPhase,
     BenchmarkEvaluationResult,
     BenchmarkEvaluationStatus,
     BenchmarkExecutionSettings,
     BenchmarkInvocationMode,
+    BenchmarkPhaseArtifactIdentifiers,
+    BenchmarkPhaseResult,
+    BenchmarkPhaseStatus,
     BenchmarkProblemDefinition,
+    BenchmarkRuntimeMode,
     BenchmarkTestCase,
     BenchmarkVerdictMapping,
+    BenchmarkVendorPollSnapshot,
+    BenchmarkVendorSubmissionReceipt,
+    BenchmarkVendorSubmissionState,
 )
 from agentconductor.domain.execution import (
     CodeCandidate,
@@ -44,6 +52,33 @@ class StubBenchmarkSubmission:
     result_artifact_uri: str | None = None
     log_artifact_uri: str | None = None
     diagnostics: tuple[str, ...] = ()
+    phase_results: tuple[BenchmarkPhaseResult, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class StubVendorSubmissionScenario:
+    """Fixture-driven vendor-native submission lifecycle for BENCH-07 tests."""
+
+    native_verdict: str
+    run_id: str
+    submission_id: str
+    polls_before_terminal: int = 0
+    result_artifact_uri: str | None = None
+    log_artifact_uri: str | None = None
+    diagnostics: tuple[str, ...] = ()
+    adapter_error_message: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.native_verdict:
+            raise ValueError("native_verdict must be a non-empty string")
+        if not self.run_id:
+            raise ValueError("run_id must be a non-empty string")
+        if not self.submission_id:
+            raise ValueError("submission_id must be a non-empty string")
+        if self.polls_before_terminal < 0:
+            raise ValueError("polls_before_terminal must be >= 0")
+        if self.adapter_error_message == "":
+            raise ValueError("adapter_error_message must be omitted or a non-empty string")
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,13 +152,173 @@ class StubBenchmarkAdapter(BenchmarkAdapter):
             adapter_name=self._adapter_name,
             status=BenchmarkEvaluationStatus.COMPLETED,
             problem=problem,
+            runtime_mode=BenchmarkRuntimeMode.VENDOR_STUB,
             artifact_identifiers=_build_artifacts(submission),
             verdict_mapping=BenchmarkVerdictMapping(
                 native_verdict=submission.native_verdict,
                 repository_outcome=repository_outcome,
                 diagnostics=submission.diagnostics,
             ),
+            phase_results=submission.phase_results,
             diagnostics=submission.diagnostics,
+        )
+
+
+class StubVendorNativeBenchmarkAdapter(BenchmarkAdapter):
+    """Fixture-driven vendor-native benchmark boundary with submission polling."""
+
+    def __init__(
+        self,
+        *,
+        submissions: dict[str, StubVendorSubmissionScenario],
+        verdict_map: dict[str, TestingOutcome] | None = None,
+        adapter_name: str = "stub-vendor-native-benchmark",
+        runtime_name: str = "stub-vendor-native",
+        max_polls: int = 8,
+    ) -> None:
+        if not adapter_name:
+            raise ValueError("adapter_name must be a non-empty string")
+        if not runtime_name:
+            raise ValueError("runtime_name must be a non-empty string")
+        if max_polls < 1:
+            raise ValueError("max_polls must be at least 1")
+        self._submissions = dict(submissions)
+        self._verdict_map = dict(verdict_map or _default_verdict_map())
+        self._adapter_name = adapter_name
+        self._runtime_name = runtime_name
+        self._runtime_mode = BenchmarkRuntimeMode.VENDOR_STUB
+        self._max_polls = max_polls
+
+    def evaluate(
+        self,
+        problem: BenchmarkProblemDefinition,
+        candidate: CodeCandidate,
+        settings: BenchmarkExecutionSettings,
+        test_cases: tuple[BenchmarkTestCase, ...] = (),
+    ) -> BenchmarkEvaluationResult:
+        del test_cases
+        scenario = self._submissions.get(problem.source_problem_id)
+        if scenario is None:
+            return BenchmarkEvaluationResult(
+                adapter_name=self._adapter_name,
+                status=BenchmarkEvaluationStatus.ADAPTER_ERROR,
+                problem=problem,
+                runtime_mode=self._runtime_mode,
+                diagnostics=(
+                    f"No stub vendor submission lifecycle was configured for '{problem.source_problem_id}'.",
+                ),
+            )
+        if candidate.language != problem.language:
+            return BenchmarkEvaluationResult(
+                adapter_name=self._adapter_name,
+                status=BenchmarkEvaluationStatus.ADAPTER_ERROR,
+                problem=problem,
+                runtime_mode=self._runtime_mode,
+                diagnostics=(
+                    f"Candidate language '{candidate.language}' does not match benchmark problem language '{problem.language}'.",
+                ),
+            )
+        if scenario.adapter_error_message:
+            return BenchmarkEvaluationResult(
+                adapter_name=self._adapter_name,
+                status=BenchmarkEvaluationStatus.ADAPTER_ERROR,
+                problem=problem,
+                runtime_mode=self._runtime_mode,
+                vendor_submission_receipt=BenchmarkVendorSubmissionReceipt(
+                    submission_id=scenario.submission_id,
+                    runtime_name=self._runtime_name,
+                ),
+                vendor_poll_history=(
+                    BenchmarkVendorPollSnapshot(
+                        submission_id=scenario.submission_id,
+                        state=BenchmarkVendorSubmissionState.ADAPTER_ERROR,
+                        diagnostics=(scenario.adapter_error_message,),
+                    ),
+                ),
+                diagnostics=(scenario.adapter_error_message,),
+            )
+
+        receipt = BenchmarkVendorSubmissionReceipt(
+            submission_id=scenario.submission_id,
+            runtime_name=settings.vendor_runtime_name or self._runtime_name,
+        )
+        poll_history = [
+            BenchmarkVendorPollSnapshot(
+                submission_id=receipt.submission_id,
+                state=BenchmarkVendorSubmissionState.SUBMITTED,
+                diagnostics=(
+                    f"Submitted candidate to vendor runtime '{receipt.runtime_name}'.",
+                ),
+            )
+        ]
+        for _ in range(scenario.polls_before_terminal):
+            if len(poll_history) >= self._max_polls:
+                return BenchmarkEvaluationResult(
+                    adapter_name=self._adapter_name,
+                    status=BenchmarkEvaluationStatus.ADAPTER_ERROR,
+                    problem=problem,
+                    runtime_mode=self._runtime_mode,
+                    vendor_submission_receipt=receipt,
+                    vendor_poll_history=tuple(poll_history),
+                    diagnostics=(
+                        f"Vendor submission '{receipt.submission_id}' did not reach a terminal state within {self._max_polls} polls.",
+                    ),
+                )
+            poll_history.append(
+                BenchmarkVendorPollSnapshot(
+                    submission_id=receipt.submission_id,
+                    state=BenchmarkVendorSubmissionState.RUNNING,
+                    diagnostics=("Vendor runtime is still executing the submission.",),
+                )
+            )
+
+        artifacts = BenchmarkArtifactIdentifiers(
+            run_id=scenario.run_id,
+            submission_id=scenario.submission_id,
+            result_artifact_uri=scenario.result_artifact_uri,
+            log_artifact_uri=scenario.log_artifact_uri,
+        )
+        poll_history.append(
+            BenchmarkVendorPollSnapshot(
+                submission_id=receipt.submission_id,
+                state=BenchmarkVendorSubmissionState.COMPLETED,
+                terminal_verdict=scenario.native_verdict,
+                diagnostics=scenario.diagnostics,
+            )
+        )
+        repository_outcome = self._verdict_map.get(scenario.native_verdict)
+        if repository_outcome is None:
+            return BenchmarkEvaluationResult(
+                adapter_name=self._adapter_name,
+                status=BenchmarkEvaluationStatus.ADAPTER_ERROR,
+                problem=problem,
+                runtime_mode=self._runtime_mode,
+                artifact_identifiers=artifacts,
+                vendor_submission_receipt=receipt,
+                vendor_poll_history=tuple(poll_history),
+                diagnostics=(
+                    f"Native benchmark verdict '{scenario.native_verdict}' has no repository mapping.",
+                )
+                + scenario.diagnostics,
+            )
+
+        return BenchmarkEvaluationResult(
+            adapter_name=self._adapter_name,
+            status=BenchmarkEvaluationStatus.COMPLETED,
+            problem=problem,
+            runtime_mode=self._runtime_mode,
+            artifact_identifiers=artifacts,
+            verdict_mapping=BenchmarkVerdictMapping(
+                native_verdict=scenario.native_verdict,
+                repository_outcome=repository_outcome,
+                diagnostics=scenario.diagnostics,
+            ),
+            vendor_submission_receipt=receipt,
+            vendor_poll_history=tuple(poll_history),
+            diagnostics=(
+                f"Evaluation completed through vendor-native benchmark runtime '{receipt.runtime_name}'.",
+            )
+            + scenario.diagnostics,
         )
 
 
@@ -470,7 +665,7 @@ def _build_benchmark_result(
     settings: BenchmarkExecutionSettings,
     sandbox_result: SandboxExecutionResult,
 ) -> BenchmarkEvaluationResult:
-    artifact_identifiers = _write_artifacts(
+    phase_results, artifact_identifiers = _write_artifacts(
         artifact_root=artifact_root,
         problem=problem,
         candidate=candidate,
@@ -489,12 +684,14 @@ def _build_benchmark_result(
         adapter_name=adapter_name,
         status=BenchmarkEvaluationStatus.COMPLETED,
         problem=problem,
+        runtime_mode=BenchmarkRuntimeMode.LOCAL_HARNESS,
         artifact_identifiers=artifact_identifiers,
         verdict_mapping=BenchmarkVerdictMapping(
             native_verdict=native_verdict,
             repository_outcome=repository_outcome,
             diagnostics=sandbox_result.diagnostics,
         ),
+        phase_results=phase_results,
         diagnostics=diagnostics,
     )
 
@@ -506,7 +703,7 @@ def _write_artifacts(
     candidate: CodeCandidate,
     settings: BenchmarkExecutionSettings,
     sandbox_result: SandboxExecutionResult,
-) -> BenchmarkArtifactIdentifiers:
+) -> tuple[tuple[BenchmarkPhaseResult, ...], BenchmarkArtifactIdentifiers]:
     safe_problem_id = problem.identifier.replace("/", "_").replace("\\", "_")
     run_id = f"{safe_problem_id}-{uuid.uuid4().hex[:8]}"
     resolved_root = artifact_root or Path(
@@ -516,6 +713,9 @@ def _write_artifacts(
 
     result_path = resolved_root / f"{run_id}.result.json"
     log_path = resolved_root / f"{run_id}.log.json"
+    run_stdout_path = resolved_root / f"{run_id}.run.stdout.txt"
+    run_stderr_path = resolved_root / f"{run_id}.run.stderr.txt"
+    run_metadata_path = resolved_root / f"{run_id}.run.meta.json"
     result_path.write_text(
         json.dumps(
             {
@@ -549,11 +749,51 @@ def _write_artifacts(
         ),
         encoding="utf-8",
     )
-    return BenchmarkArtifactIdentifiers(
+    run_stdout_path.write_text(sandbox_result.stdout, encoding="utf-8")
+    run_stderr_path.write_text(sandbox_result.stderr, encoding="utf-8")
+    run_metadata_path.write_text(
+        json.dumps(
+            {
+                "phase": BenchmarkExecutionPhase.RUN.value,
+                "invocation_mode": settings.invocation_mode.value,
+                "language": settings.language,
+                "requires_compilation": settings.requires_compilation,
+                "outcome": sandbox_result.outcome.value,
+                "returncode": sandbox_result.exit_code,
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    phase_artifacts = (
+        BenchmarkPhaseArtifactIdentifiers(
+            phase=BenchmarkExecutionPhase.RUN,
+            stdout_artifact_uri=str(run_stdout_path),
+            stderr_artifact_uri=str(run_stderr_path),
+            metadata_artifact_uri=str(run_metadata_path),
+        ),
+    )
+    phase_results = (
+        BenchmarkPhaseResult(
+            phase=BenchmarkExecutionPhase.RUN,
+            status=(
+                BenchmarkPhaseStatus.COMPLETED
+                if sandbox_result.outcome is TestingOutcome.PASSED
+                else BenchmarkPhaseStatus.FAILED
+            ),
+            diagnostics=sandbox_result.diagnostics,
+            artifact_identifiers=phase_artifacts[0],
+            repository_outcome=sandbox_result.outcome,
+            returncode=sandbox_result.exit_code,
+            timed_out=sandbox_result.outcome is TestingOutcome.TIME_LIMIT_EXCEEDED,
+        ),
+    )
+    return phase_results, BenchmarkArtifactIdentifiers(
         run_id=run_id,
         submission_id=run_id,
         result_artifact_uri=str(result_path),
         log_artifact_uri=str(log_path),
+        phase_artifacts=phase_artifacts,
     )
 
 

@@ -5,6 +5,7 @@ import pytest
 
 from agentconductor import (
     BenchmarkDatasetFormat,
+    BenchmarkExecutionPhase,
     BenchmarkEvaluationStatus,
     CodeCandidate,
     MultiLanguageBenchmarkJudgeAdapter,
@@ -41,6 +42,7 @@ def test_python_benchmark_judge_adapter_executes_function_record(
     assert result.testing_outcome is TestingOutcome.PASSED
     assert result.verdict_mapping is not None
     assert result.verdict_mapping.native_verdict == "accepted"
+    assert result.phase_results[0].phase is BenchmarkExecutionPhase.RUN
     assert "external benchmark path" in result.diagnostics[0]
     assert Path(result.artifact_identifiers.result_artifact_uri).exists()
     assert Path(result.artifact_identifiers.log_artifact_uri).exists()
@@ -136,6 +138,7 @@ def test_nodejs_benchmark_judge_adapter_reports_compilation_error(
     assert result.testing_outcome is TestingOutcome.COMPILATION_ERROR
     assert result.verdict_mapping is not None
     assert result.verdict_mapping.native_verdict == "compilation_error"
+    assert result.phase_results[0].phase is BenchmarkExecutionPhase.RUN
     assert Path(result.artifact_identifiers.result_artifact_uri).exists()
 
 
