@@ -975,7 +975,7 @@ Out of scope:
 - production model serving infrastructure
 
 ### Task ID: EVAL-02
-Status: todo
+Status: done
 Depends on: BENCH-07, ORCH-03, RL-02
 Scope: run benchmark-aligned evaluation over trained frozen inference and produce leaderboard-grade aggregate metrics
 Files:

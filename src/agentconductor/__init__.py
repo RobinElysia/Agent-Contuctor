@@ -9,6 +9,8 @@ from agentconductor.application.benchmark import (
 )
 from agentconductor.application.distributed import evaluate_candidates_distributed
 from agentconductor.application.evaluation import (
+    run_benchmark_evaluation,
+    run_benchmark_evaluation_entrypoint,
     run_batch_evaluation,
     run_batch_evaluation_entrypoint,
 )
@@ -52,6 +54,7 @@ from agentconductor.domain.evaluation import (
     EvaluationProblemDefinition,
     EvaluationProblemResult,
     EvaluationRunArtifact,
+    EvaluationRunMetadata,
     EvaluationSummary,
 )
 from agentconductor.domain.rl import (
@@ -179,6 +182,7 @@ __all__ = [
     "EvaluationProblemDefinition",
     "EvaluationProblemResult",
     "EvaluationRunArtifact",
+    "EvaluationRunMetadata",
     "EvaluationSummary",
     "ExecutionStatus",
     "JudgeCaseResult",
@@ -258,6 +262,8 @@ __all__ = [
     "plan_problem_topology_candidate",
     "read_jsonl_objects",
     "revise_problem_topology_candidate",
+    "run_benchmark_evaluation",
+    "run_benchmark_evaluation_entrypoint",
     "run_batch_evaluation",
     "run_batch_evaluation_entrypoint",
     "run_rl_baseline",

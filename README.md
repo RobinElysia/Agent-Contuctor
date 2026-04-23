@@ -16,7 +16,7 @@ The repository currently provides:
 - a multi-language benchmark execution path for Python and JavaScript canonical benchmark records
 - focused tests for the bootstrap and API layers
 
-The repository does not yet implement the full paper runtime. The current API can run up to the configured turn budget with deterministic topology revision and local judge-backed evaluation, but the judge remains a repository-local approximation rather than an exact benchmark integration.
+The repository does not yet implement the full paper runtime. The current API can run up to the configured turn budget with deterministic or checkpoint-backed topology revision, and the repository now emits benchmark-aligned evaluation artifacts, but the benchmark runtime is still repository-local rather than vendor-native.
 
 ## Current Status
 
@@ -45,6 +45,7 @@ Completed milestones:
 - `ORCH-03`: checkpoint-backed frozen inference wiring for the online solve loop and learned planning entrypoints
 - `RL-01`: repository-local reward breakdown and RL-style rollout artifact generation
 - `RL-02`: checkpoint-updating RL path with grouped rollout artifacts, lightweight GRPO-style update summaries, and loadable updated checkpoint metadata
+- `EVAL-02`: benchmark-aligned frozen-inference evaluation with structured per-attempt artifacts, dataset or harness provenance, and pass@1 or pass@k aggregates
 - `BENCH-01`: typed external benchmark adapter seam for execution metadata and verdict mapping
 - `BENCH-02`: canonical benchmark dataset ingestion and normalization for APPS-style JSONL artifacts
 - `BENCH-03`: concrete Python benchmark execution path over canonical benchmark records
@@ -263,14 +264,16 @@ Fallback verification commands:
 - `$env:UV_CACHE_DIR = ".uv-cache"; uv run pytest`
 - `uv sync --locked` before the test command if the environment is not yet synced
 
-Run a small batch evaluation artifact:
+Run a small benchmark-aligned evaluation artifact:
 
 ```powershell
-uv run python -m agentconductor.interfaces.evaluation --dataset .\examples\eval-dataset.json --output .\artifacts\eval-results.json
+uv run python -m agentconductor.interfaces.evaluation --dataset .\tests\fixtures\benchmark\apps_fixture.jsonl --output .\artifacts\eval-results.json --checkpoint .\artifacts\sft-run.json --samples-per-problem 1
 ```
 
-The dataset JSON must contain a `problems` list with `identifier`, `prompt`,
-and optional `difficulty` fields.
+The evaluation dataset must be a supported canonical benchmark source such as
+APPS-style JSONL. The generated artifact records dataset version, harness
+version, runtime mode, checkpoint id, per-attempt outcomes, and aggregate
+metrics including `pass@1` and `pass@k`.
 
 Generate synthetic SFT data and run the checkpoint-producing SFT path:
 
@@ -360,8 +363,12 @@ uv run python -m agentconductor.interfaces.rl --dataset .\artifacts\sft-dataset.
   benchmark payloads.
 - Parallel candidate evaluation now goes through an explicit orchestration
   boundary with inspectable worker count, retry count, and collection timeout.
-- Batch evaluation artifacts record per-problem solve outcomes, latency, and
-  topology metadata so later training analysis can reuse them.
+- Benchmark-aligned evaluation artifacts now record per-attempt solve
+  outcomes, benchmark verdicts, latency, dataset version, harness version,
+  runtime mode, and aggregate pass metrics so later comparisons do not depend
+  on ad hoc log parsing.
+- The current evaluation path computes repository-observed `pass@k` from
+  structured repeated attempts over canonical benchmark records.
 - The SFT path now writes both canonical mapping targets and YAML topology
   targets, plus an explicit training-manifest file and loadable checkpoint
   metadata.
@@ -383,6 +390,10 @@ uv run python -m agentconductor.interfaces.rl --dataset .\artifacts\sft-dataset.
 - The current RL optimizer is still a repository-local GRPO-shaped stub. It
   makes rollout rewards, checkpoint lineage, and update scale explicit, but it
   does not claim paper-scale distributed training fidelity.
+- The current benchmark evaluation runtime still uses repository-local Python
+  and JavaScript harness adapters. Vendor-native runtime fidelity remains a
+  later task, so reported metrics should be treated as benchmark-aligned rather
+  than exact leaderboard claims.
 - When behavior is inferred rather than stated by the paper, the repository documents that explicitly.
 
 ## Next Likely Steps
@@ -391,3 +402,4 @@ uv run python -m agentconductor.interfaces.rl --dataset .\artifacts\sft-dataset.
 - extend benchmark execution beyond the current Python and JavaScript local harnesses, especially for compiled-language and vendor-native runtimes
 - replace the mock checkpoint runtime with real checkpoint-backed model inference
 - replace the lightweight GRPO-style stub updater with a fuller paper-aligned RL optimizer
+- close the vendor-native runtime gap so benchmark evaluation can move from local-harness alignment to stricter paper-level reproduction

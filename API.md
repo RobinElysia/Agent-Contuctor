@@ -29,6 +29,7 @@ Stable callable API:
 - `agentconductor.evaluate_candidate_against_benchmark_record`
 - `agentconductor.load_canonical_benchmark_dataset`
 - `agentconductor.evaluate_candidate_batch`
+- `agentconductor.run_benchmark_evaluation_entrypoint`
 - `agentconductor.run_batch_evaluation_entrypoint`
 - `agentconductor.generate_sft_dataset_entrypoint`
 - `agentconductor.load_sft_checkpoint_entrypoint`
@@ -73,6 +74,7 @@ Other public types:
 - `agentconductor.EvaluationProblemDefinition`
 - `agentconductor.EvaluationProblemResult`
 - `agentconductor.EvaluationRunArtifact`
+- `agentconductor.EvaluationRunMetadata`
 - `agentconductor.EvaluationSummary`
 - `agentconductor.ExecutionStatus`
 - `agentconductor.RewardBreakdown`
@@ -589,18 +591,36 @@ Behavior:
 - keeps `max_workers=1` as the local single-worker fallback path
 - returns typed per-task statuses plus the underlying `SandboxExecutionResult` when available
 
-## Batch Evaluation API
+## Benchmark Evaluation API
 
-### `run_batch_evaluation_entrypoint(dataset_path, output_path, *, max_workers=1) -> EvaluationRunArtifact`
+### `run_benchmark_evaluation_entrypoint(dataset_path, output_path, *, checkpoint_source, checkpoint_id=None, source_format=BenchmarkDatasetFormat.APPS_JSONL, samples_per_problem=1, pass_k=None, max_workers=1, max_turns=2, orchestrator_device="cpu", orchestrator_max_attempts=1) -> EvaluationRunArtifact`
 
-Run the current solve-and-judge stack over a JSON dataset and write a JSON
-artifact containing per-problem outcomes and an aggregate summary.
+Run checkpoint-backed frozen inference over a canonical benchmark dataset and
+write a structured evaluation artifact.
 
-Dataset format:
+Behavior:
 
-- top-level object with a non-empty `problems` list
-- each problem must define `identifier` and `prompt`
-- `difficulty` is optional and must be `easy`, `medium`, or `hard` when present
+- loads a canonical benchmark dataset such as APPS JSONL through the benchmark dataset seam
+- resolves one orchestrator checkpoint explicitly from a checkpoint directory,
+  checkpoint metadata file, or training artifact JSON
+- runs the current solve loop for each benchmark problem and each configured
+  attempt index
+- re-judges the emitted candidate through the benchmark adapter boundary rather
+  than trusting repository-local solve diagnostics alone
+- writes per-attempt results that preserve solve status, benchmark verdict,
+  latency, topology size, benchmark artifact identifiers, and checkpoint id
+- writes run metadata including dataset version, harness version, runtime mode,
+  checkpoint provenance, and aggregate `pass@1` / `pass@k`
+
+Current fidelity note:
+
+- the default runtime still uses repository-local Python and JavaScript
+  benchmark harness adapters, so the produced metrics are benchmark-aligned but
+  not yet vendor-native leaderboard reproductions
+
+### `run_batch_evaluation_entrypoint(...) -> EvaluationRunArtifact`
+
+Compatibility alias for `run_benchmark_evaluation_entrypoint(...)`.
 
 ## SFT Baseline API
 

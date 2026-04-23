@@ -31,6 +31,13 @@ from agentconductor.domain.execution import (
     TopologyExecutionError,
     TopologyExecutionResult,
 )
+from agentconductor.domain.evaluation import (
+    EvaluationProblemDefinition,
+    EvaluationProblemResult,
+    EvaluationRunArtifact,
+    EvaluationRunMetadata,
+    EvaluationSummary,
+)
 from agentconductor.domain.history import (
     SolveState,
     SolveStateTransitionError,
@@ -91,6 +98,11 @@ __all__ = [
     "CanonicalBenchmarkRecord",
     "CodeCandidate",
     "ExecutionStatus",
+    "EvaluationProblemDefinition",
+    "EvaluationProblemResult",
+    "EvaluationRunArtifact",
+    "EvaluationRunMetadata",
+    "EvaluationSummary",
     "JudgeCaseResult",
     "JudgeResourceLimits",
     "LearnedTopologyPlan",
