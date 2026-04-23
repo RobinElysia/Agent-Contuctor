@@ -24,8 +24,6 @@ The repository does not yet implement the full paper runtime. The current API ca
 
 Current strict-reproduction claim: `approximate reproduction`
 
-See [docs/reproduction.md](/D:/code/PaperCreate/AgentConductor/docs/reproduction.md) for the line-item fidelity checklist and the current blockers to an exact paper-level claim.
-
 ## Current Status
 
 Completed milestones:
@@ -259,7 +257,6 @@ The learned orchestrator path preserves explicit failure boundaries as well:
 - schema-invalid or logic-invalid topologies raise the existing validation errors
 
 See [API.md](/D:/code/PaperCreate/AgentConductor/API.md) for the full interface contract.
-See [use.md](/D:/code/PaperCreate/AgentConductor/use.md) for task-oriented usage examples.
 
 ## Testing
 

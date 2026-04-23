@@ -1,5 +1,4 @@
 .venv/
 .uv-cache/
 docs/
-use.md
 AGENTS.md
